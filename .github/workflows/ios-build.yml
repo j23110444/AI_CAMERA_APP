@@ -32,3 +32,14 @@ jobs:
 
       - name: Build iOS
         run: flutter build ios --release --no-codesign
+
+      - name: Package iOS App
+        run: |
+          mkdir -p build/ios-artifact
+          cp -R build/ios/iphoneos/Runner.app build/ios-artifact/Runner.app
+
+      - name: Upload iOS App
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-app
+          path: build/ios-artifact/Runner.app
