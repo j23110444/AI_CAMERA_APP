@@ -35,11 +35,14 @@ jobs:
 
       - name: Package iOS App
         run: |
-          mkdir -p build/ios-artifact
-          cp -R build/ios/iphoneos/Runner.app build/ios-artifact/Runner.app
+          mkdir -p build/ios-artifact/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios-artifact/Payload/Runner.app
+
+          cd build/ios-artifact
+          zip -r AI_Camera_unsigned.ipa Payload
 
       - name: Upload iOS App
         uses: actions/upload-artifact@v4
         with:
           name: ios-release-app
-          path: build/ios-artifact/Runner.app
+          path: build/ios-artifact/AI_Camera_unsigned.ipa
