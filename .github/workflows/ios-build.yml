@@ -30,6 +30,24 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
+
+      - name: Check Xcode Signing Environment
+        run: |
+          echo "=== Xcode ==="
+          xcodebuild -version
+
+          echo "=== Xcode Path ==="
+          xcode-select -p
+
+          echo "=== Signing Identities ==="
+          security find-identity -v -p codesigning || true
+
+          echo "=== Provisioning Profiles ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles 2>/dev/null || true
+
+          echo "=== Xcode Accounts ==="
+          defaults read com.apple.dt.Xcode DVTDeveloperAccountManager 2>/dev/null || true
+          
       - name: Build iOS
         run: flutter build ios --release --no-codesign
 
