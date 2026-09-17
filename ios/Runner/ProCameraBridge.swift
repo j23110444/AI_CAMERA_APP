@@ -59,9 +59,11 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
           return
         }
         device.exposureMode = .continuousAutoExposure
-        device.setExposureTargetBias(
-          Float(bias.clamped(to: device.minExposureTargetBias...device.maxExposureTargetBias))
-        )
+        let minBias = Double(device.minExposureTargetBias)
+        let maxBias = Double(device.maxExposureTargetBias)
+        let clampedBias = min(max(bias, minBias), maxBias)
+
+        device.setExposureTargetBias(Float(clampedBias))
         result(nil)
 
       case "setManualFocus":
