@@ -1,6 +1,6 @@
 import 'package:test/test.dart';
 
-import 'package:aicamera/core/core.dart';
+import 'package:ai_camera_app/core/core.dart';
 
 void main() {
   group('MomentScorer', () {
