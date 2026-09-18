@@ -126,10 +126,9 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
         let position = (args?["position"] as? NSNumber)?.floatValue ?? 0.5
 
         try cameraManager.setFocus(
-          mode,
-          position: position
+            mode: mode,
+            position: position
         )
-
         result(nil)
 
       case "setFocusPoint":
@@ -158,7 +157,7 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
           (args?["kelvin"] as? NSNumber)?.floatValue ?? 5200
 
         try cameraManager.setWhiteBalance(
-          kelvin: kelvin
+            kelvin: kelvin
         )
 
         result(nil)
