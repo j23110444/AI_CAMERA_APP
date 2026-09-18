@@ -132,6 +132,33 @@ class FlutterCameraAdapter implements CameraPort {
     await _initializeController(ultraWide.first.value);
   }
 
+  @override
+  Future<void> switchToStandardWide() async {
+    final rearCameras = _cameras
+        .asMap()
+        .entries
+        .where((entry) => entry.value.lensDirection == CameraLensDirection.back)
+        .toList();
+    final standard = rearCameras.where((entry) {
+      final name = entry.value.name.toLowerCase();
+      return !name.contains('ultra') &&
+          !name.contains('tele') &&
+          !name.contains('2x');
+    }).toList();
+    final candidates = standard.isNotEmpty ? standard : rearCameras;
+
+    if (candidates.isEmpty) {
+      throw StateError('找不到後置標準廣角鏡頭');
+    }
+
+    await _controller?.dispose();
+    _controller = null;
+    _cameraIndex = candidates.first.key;
+    _previousAnalysisFrame = null;
+    _sceneChangeTracker.reset();
+    await _initializeController(candidates.first.value);
+  }
+
   void _handleCameraImage(CameraImage image) {
     final bytes = _convertToAnalysisBytes(image);
 
@@ -334,6 +361,37 @@ class FlutterCameraAdapter implements CameraPort {
         await controller.startImageStream(_handleCameraImage);
       }
     }
+  }
+
+  @override
+  Future<LivePhotoCapture> captureLivePhoto() async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      throw StateError('相機尚未初始化');
+    }
+    if (controller.value.isRecordingVideo) {
+      throw StateError('相機正在錄影');
+    }
+
+    final wasStreaming = controller.value.isStreamingImages;
+    if (wasStreaming) {
+      await controller.stopImageStream();
+    }
+
+    late final String photoPath;
+    late final XFile videoFile;
+    try {
+      photoPath = (await controller.takePicture()).path;
+      await controller.startVideoRecording();
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      videoFile = await controller.stopVideoRecording();
+    } finally {
+      if (wasStreaming && controller.value.isInitialized) {
+        await controller.startImageStream(_handleCameraImage);
+      }
+    }
+
+    return LivePhotoCapture(photoPath: photoPath, videoPath: videoFile.path);
   }
 
   @override

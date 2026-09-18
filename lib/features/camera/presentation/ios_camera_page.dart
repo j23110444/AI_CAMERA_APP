@@ -4,9 +4,13 @@ import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:camera/camera.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:flutter/gestures.dart';
 import 'package:video_player_win/video_player_win.dart';
+import 'package:video_player/video_player.dart' as vp;
 import 'package:flutter/material.dart';
+import 'package:gal/gal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
@@ -78,6 +82,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   // Gallery / 相簿應該使用這個清單。
   // ============================================================
   final List<String> _savedImages = [];
+  final Map<String, String> _livePhotoVideos = {};
 
   String? _aiTipMessage;
   Timer? _aiTipTimer;
@@ -223,6 +228,25 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       _showAiTip('🔭 已切換至 0.5x 超廣角');
     } catch (error) {
       if (mounted) _showAiTip('⚠️ 0.5x 超廣角無法使用：$error');
+    } finally {
+      if (mounted) setState(() => _cameraSwitching = false);
+    }
+  }
+
+  Future<void> _switchToStandardWide() async {
+    if (_cameraSwitching || _cameraInitializing) return;
+    setState(() => _cameraSwitching = true);
+    try {
+      await _cameraAdapter.switchToStandardWide();
+      if (!mounted) return;
+      setState(() {
+        _zoomLevel = 1.0;
+        _focusPoint = null;
+        _isFocusVisible = false;
+        _isAeAfLocked = false;
+      });
+    } catch (error) {
+      if (mounted) _showAiTip('⚠️ 1x 標準廣角無法使用：$error');
     } finally {
       if (mounted) setState(() => _cameraSwitching = false);
     }
@@ -419,10 +443,17 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
 
   Future<void> _capturePhoto() async {
     try {
-      final path = await _cameraAdapter.capturePhoto();
+      final liveCapture = _livePhotoEnabled
+          ? await _cameraAdapter.captureLivePhoto()
+          : null;
+      final path =
+          liveCapture?.photoPath ?? await _cameraAdapter.capturePhoto();
       if (!mounted) return;
       setState(() {
         _capturedImages.add(path);
+        if (liveCapture != null) {
+          _livePhotoVideos[path] = liveCapture.videoPath;
+        }
         _isCapturing = false;
         _captureAnimation = true;
       });
@@ -805,10 +836,138 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     });
 
     await _persistImageLists();
+    try {
+      await Gal.putImage(sourcePath);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to save image to system gallery: $error');
+      debugPrint('$stackTrace');
+      if (mounted) {
+        _showAiTip('⚠️ 已保存到 App，相簿權限或系統相簿保存失敗');
+      }
+    }
 
     debugPrint('✅ Candidate moved to saved images: $sourcePath');
 
     return true;
+  }
+
+  Future<void> _showLivePhotoPreview(String photoPath) async {
+    final videoPath = _livePhotoVideos[photoPath];
+    if (videoPath == null || !await File(videoPath).exists()) {
+      _showEnlargedGallery(_capturedImages.indexOf(photoPath));
+      return;
+    }
+
+    final controller = vp.VideoPlayerController.file(File(videoPath));
+    await controller.initialize();
+    await controller.setLooping(true);
+    await controller.play();
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+
+    var selectedPosition = Duration.zero;
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) => Dialog(
+            backgroundColor: Colors.black,
+            insetPadding: const EdgeInsets.all(18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AspectRatio(
+                  aspectRatio: controller.value.aspectRatio,
+                  child: vp.VideoPlayer(controller),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '原況預覽',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          final framePath = await _extractLivePhotoFrame(
+                            videoPath,
+                            selectedPosition,
+                          );
+                          if (framePath == null || !mounted) return;
+                          final index = _capturedImages.indexOf(photoPath);
+                          if (index >= 0) {
+                            setState(() {
+                              _capturedImages[index] = framePath;
+                              _livePhotoVideos[framePath] = videoPath;
+                              _livePhotoVideos.remove(photoPath);
+                            });
+                            await _persistImageLists();
+                          }
+                          if (dialogContext.mounted) {
+                            Navigator.pop(dialogContext);
+                          }
+                          _showAiTip('✅ 已選擇原況中的這個瞬間');
+                        },
+                        child: const Text('選擇瞬間'),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+                Slider(
+                  value: selectedPosition.inMilliseconds.toDouble(),
+                  min: 0,
+                  max: (controller.value.duration.inMilliseconds)
+                      .clamp(1, 60000)
+                      .toDouble(),
+                  activeColor: Colors.yellowAccent,
+                  onChanged: (value) async {
+                    selectedPosition = Duration(milliseconds: value.round());
+                    await controller.seekTo(selectedPosition);
+                    if (context.mounted) setDialogState(() {});
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    await controller.dispose();
+  }
+
+  Future<String?> _extractLivePhotoFrame(
+    String videoPath,
+    Duration position,
+  ) async {
+    final video = File(videoPath);
+    if (!await video.exists()) return null;
+    final output = File(
+      '${video.parent.path}${Platform.pathSeparator}'
+      'live_${DateTime.now().microsecondsSinceEpoch}.jpg',
+    );
+    final seconds = position.inMilliseconds / 1000;
+    final session = await FFmpegKit.execute(
+      '-ss $seconds -i "${video.path}" -frames:v 1 -q:v 2 "${output.path}"',
+    );
+    final code = await session.getReturnCode();
+    if (!ReturnCode.isSuccess(code) || !await output.exists()) {
+      _showAiTip('⚠️ 原況瞬間擷取失敗');
+      return null;
+    }
+    return output.path;
   }
 
   Future<void> _exitUploadedVideo() async {
@@ -1201,7 +1360,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       0.04,
       0.21,
     );
-    return _paletteColor(_selectedPalette).withValues(alpha: opacity * 0.65);
+    return _paletteColor(_selectedPalette).withValues(alpha: opacity);
   }
 
   Widget _buildPreviewEffectOverlay() {
@@ -4103,44 +4262,46 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                   ),
                                 ],
                               )
-                            : SizedBox.expand(
-                                key: _previewKey,
-                                child: ClipRect(
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Transform.scale(
-                                        alignment: Alignment.center,
-                                        scale: _zoomLevel,
-                                        child: _buildCameraPreview(),
-                                      ),
-                                      _buildPreviewEffectOverlay(),
-                                      _buildFocusOverlay(),
-                                      _buildLevelOverlay(),
-                                      _buildProOverlay(),
-                                      CustomPaint(
-                                        painter: CompositionGridPainter(
-                                          _compositionGrid,
-                                        ),
-                                      ),
-                                      if (_timerCountdown > 0)
-                                        Center(
-                                          child: Text(
-                                            '$_timerCountdown',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 72,
-                                              fontWeight: FontWeight.w300,
-                                              shadows: [
-                                                Shadow(
-                                                  color: Colors.black,
-                                                  blurRadius: 8,
-                                                ),
-                                              ],
-                                            ),
+                            : Padding(
+                                padding: const EdgeInsets.only(
+                                  top: 108,
+                                  bottom: 188,
+                                ),
+                                child: SizedBox.expand(
+                                  key: _previewKey,
+                                  child: ClipRect(
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        _buildCameraPreview(),
+                                        _buildPreviewEffectOverlay(),
+                                        _buildFocusOverlay(),
+                                        _buildLevelOverlay(),
+                                        _buildProOverlay(),
+                                        CustomPaint(
+                                          painter: CompositionGridPainter(
+                                            _compositionGrid,
                                           ),
                                         ),
-                                    ],
+                                        if (_timerCountdown > 0)
+                                          Center(
+                                            child: Text(
+                                              '$_timerCountdown',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 72,
+                                                fontWeight: FontWeight.w300,
+                                                shadows: [
+                                                  Shadow(
+                                                    color: Colors.black,
+                                                    blurRadius: 8,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -4212,8 +4373,8 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                           if (!_isRecording && _activeUploadedVideo == null)
                             Flexible(
                               flex: 3,
-                              child: Transform.translate(
-                                offset: const Offset(0, 10),
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 10),
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -4987,6 +5148,9 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                 },
 
                                 child: GestureDetector(
+                                  onTap: _livePhotoVideos.containsKey(itemPath)
+                                      ? () => _showLivePhotoPreview(itemPath)
+                                      : null,
                                   onLongPress: () =>
                                       _showEnlargedGallery(index),
 
@@ -5245,7 +5409,11 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                   _switchToUltraWide,
                                 ),
                                 const SizedBox(width: 14),
-                                _buildZoomLabelButton(1.0, '1x'),
+                                _buildZoomLabelButton(
+                                  1.0,
+                                  '1x',
+                                  onSelected: _switchToStandardWide,
+                                ),
                                 const SizedBox(width: 14),
                                 _buildZoomLabelButton(2.0, '2x'),
                                 const SizedBox(width: 14),
@@ -5449,10 +5617,18 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     );
   }
 
-  Widget _buildZoomLabelButton(double targetZoom, String label) {
+  Widget _buildZoomLabelButton(
+    double targetZoom,
+    String label, {
+    VoidCallback? onSelected,
+  }) {
     final bool isSelected = (_zoomLevel - targetZoom).abs() < 0.25;
     return GestureDetector(
       onTap: () {
+        if (onSelected != null) {
+          onSelected();
+          return;
+        }
         setState(() {
           _zoomLevel = targetZoom;
         });

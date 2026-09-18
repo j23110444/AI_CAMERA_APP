@@ -1,6 +1,13 @@
 import '../domain/models.dart';
 import 'camera_metrics.dart';
 
+class LivePhotoCapture {
+  final String photoPath;
+  final String videoPath;
+
+  const LivePhotoCapture({required this.photoPath, required this.videoPath});
+}
+
 abstract class CameraPort {
   /// AI 分析用的相機畫面。
   ///
@@ -23,6 +30,7 @@ abstract class CameraPort {
   Future<void> initialize();
   Future<void> switchCamera();
   Future<void> switchToUltraWide();
+  Future<void> switchToStandardWide();
   Future<void> dispose();
 
   Future<void> setZoom(double value);
@@ -39,6 +47,7 @@ abstract class CameraPort {
 
   /// 真正拍攝一張照片。
   Future<String> capturePhoto();
+  Future<LivePhotoCapture> captureLivePhoto();
 
   /// 傳統連拍功能保留。
   ///

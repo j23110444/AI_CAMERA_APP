@@ -9,6 +9,7 @@ class CameraService {
   Future<void> initialize() => port.initialize();
   Future<void> switchCamera() => port.switchCamera();
   Future<void> switchToUltraWide() => port.switchToUltraWide();
+  Future<void> switchToStandardWide() => port.switchToStandardWide();
   Future<void> dispose() => port.dispose();
   Future<void> setZoom(double value) => port.setZoom(value);
   Future<void> setExposure(double value) => port.setExposure(value);
@@ -16,22 +17,17 @@ class CameraService {
     required double iso,
     required double shutterSeconds,
   }) {
-    return port.setManualExposure(
-      iso: iso,
-      shutterSeconds: shutterSeconds,
-    );
+    return port.setManualExposure(iso: iso, shutterSeconds: shutterSeconds);
   }
 
-  Future<void> setManualFocus(double position) =>
-      port.setManualFocus(position);
-  Future<void> setWhiteBalance(double kelvin) =>
-      port.setWhiteBalance(kelvin);
-  Future<void> setFocusPoint(double x, double y) =>
-      port.setFocusPoint(x, y);
+  Future<void> setManualFocus(double position) => port.setManualFocus(position);
+  Future<void> setWhiteBalance(double kelvin) => port.setWhiteBalance(kelvin);
+  Future<void> setFocusPoint(double x, double y) => port.setFocusPoint(x, y);
   Future<void> setFocusLocked(bool locked) => port.setFocusLocked(locked);
   Future<void> setFlashMode(String mode) => port.setFlashMode(mode);
   Stream<CameraMetrics> get metrics => port.metrics;
   Future<String> capturePhoto() => port.capturePhoto();
+  Future<LivePhotoCapture> captureLivePhoto() => port.captureLivePhoto();
 
   Future<List<String>> captureBurst({
     required int count,

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   ffmpeg_kit_flutter_new
+  gal
   video_player_win
 )
 
