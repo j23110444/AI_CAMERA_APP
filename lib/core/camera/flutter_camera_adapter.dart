@@ -1,7 +1,9 @@
 import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
+
 import '../domain/frame_difference_detector.dart';
 import '../domain/models.dart';
 import 'camera_port.dart';
@@ -26,19 +28,16 @@ class FlutterCameraAdapter implements CameraPort {
   final FrameDifferenceDetector _frameDifferenceDetector =
       const FrameDifferenceDetector();
 
-  final SceneChangeTracker _sceneChangeTracker =
-      SceneChangeTracker();
+  final SceneChangeTracker _sceneChangeTracker = SceneChangeTracker();
 
   List<int>? _previousAnalysisFrame;
   CameraController? get controller => _controller;
 
   @override
-  Stream<List<int>> get analysisFrames =>
-      _analysisFrameController.stream;
+  Stream<List<int>> get analysisFrames => _analysisFrameController.stream;
 
   @override
-  Stream<FrameFeatures> get featureFrames =>
-      _featureFrameController.stream;
+  Stream<FrameFeatures> get featureFrames => _featureFrameController.stream;
 
   @override
   Stream<CameraMetrics> get metrics => _metricsController.stream;
@@ -105,90 +104,99 @@ class FlutterCameraAdapter implements CameraPort {
 
   @override
   Future<void> switchToUltraWide() async {
-    final ultraWide = _cameras.asMap().entries.where((entry) {
-      final camera = entry.value;
-      return camera.lensDirection == CameraLensDirection.back &&
-          camera.name.toLowerCase().contains('ultra');
+    final rearCameras = _cameras
+        .asMap()
+        .entries
+        .where((entry) => entry.value.lensDirection == CameraLensDirection.back)
+        .toList();
+    final ultraWide = rearCameras.where((entry) {
+      final name = entry.value.name.toLowerCase();
+      return name.contains('ultra') ||
+          name.contains('wide') ||
+          name.contains('2x') ||
+          RegExp(r'\b2\b').hasMatch(name);
     }).toList();
+    final candidates = ultraWide.isNotEmpty
+        ? ultraWide
+        : rearCameras.where((entry) => entry.key != _cameraIndex).toList();
 
-    if (ultraWide.isEmpty) {
+    if (candidates.isEmpty) {
       throw StateError('此裝置沒有可用的 0.5x 超廣角鏡頭');
     }
 
     await _controller?.dispose();
     _controller = null;
-    _cameraIndex = ultraWide.first.key;
+    _cameraIndex = candidates.first.key;
     _previousAnalysisFrame = null;
     _sceneChangeTracker.reset();
     await _initializeController(ultraWide.first.value);
   }
 
   void _handleCameraImage(CameraImage image) {
-  final bytes = _convertToAnalysisBytes(image);
+    final bytes = _convertToAnalysisBytes(image);
 
-  if (bytes.isEmpty) {
-    return;
-  }
-
-  _analysisFrameController.add(bytes);
-  if (_frameIndex.isEven) {
-    final bins = List<int>.filled(32, 0);
-    var clipped = 0;
-    var total = 0;
-    var luminanceSum = 0;
-    for (final value in bytes) {
-      final luminance = value.clamp(0, 255);
-      bins[(luminance * bins.length ~/ 256).clamp(0, bins.length - 1)]++;
-      if (luminance >= 250) clipped++;
-      luminanceSum += luminance;
-      total++;
+    if (bytes.isEmpty) {
+      return;
     }
-    if (total > 0) {
-      _metricsController.add(
-        CameraMetrics(
-          histogram: bins,
-          clippedHighlightRatio: clipped / total,
-          averageLuminance: luminanceSum / total / 255,
-        ),
+
+    _analysisFrameController.add(bytes);
+    if (_frameIndex.isEven) {
+      final bins = List<int>.filled(32, 0);
+      var clipped = 0;
+      var total = 0;
+      var luminanceSum = 0;
+      for (final value in bytes) {
+        final luminance = value.clamp(0, 255);
+        bins[(luminance * bins.length ~/ 256).clamp(0, bins.length - 1)]++;
+        if (luminance >= 250) clipped++;
+        luminanceSum += luminance;
+        total++;
+      }
+      if (total > 0) {
+        _metricsController.add(
+          CameraMetrics(
+            histogram: bins,
+            clippedHighlightRatio: clipped / total,
+            averageLuminance: luminanceSum / total / 255,
+          ),
+        );
+      }
+    }
+
+    final previousFrame = _previousAnalysisFrame;
+
+    if (previousFrame != null) {
+      final result = _frameDifferenceDetector.compare(
+        previousFrame: previousFrame,
+        currentFrame: bytes,
       );
+
+      final confirmedChange = _sceneChangeTracker.update(result);
+
+      if (confirmedChange) {
+        debugPrint(
+          'AI Scene Change Confirmed: '
+          '${(result.difference * 100).toStringAsFixed(1)}%',
+        );
+      }
     }
-  }
 
-  final previousFrame = _previousAnalysisFrame;
+    _previousAnalysisFrame = bytes;
 
-  if (previousFrame != null) {
-    final result = _frameDifferenceDetector.compare(
-      previousFrame: previousFrame,
-      currentFrame: bytes,
+    _featureFrameController.add(
+      FrameFeatures(
+        frameIndex: _frameIndex++,
+        sharpness: 0.0,
+        exposure: 0.0,
+        eyesOpen: 0.0,
+        composition: 0.0,
+        subjectState: 0.0,
+        preferredAngle: 0.0,
+        expression: 0.0,
+        colorMatch: 0.0,
+      ),
     );
-
-    final confirmedChange =
-    _sceneChangeTracker.update(result);
-
-    if (confirmedChange) {
-      debugPrint(
-        'AI Scene Change Confirmed: '
-        '${(result.difference * 100).toStringAsFixed(1)}%',
-      );
-    }
   }
-
-  _previousAnalysisFrame = bytes;
-
-  _featureFrameController.add(
-    FrameFeatures(
-      frameIndex: _frameIndex++,
-      sharpness: 0.0,
-      exposure: 0.0,
-      eyesOpen: 0.0,
-      composition: 0.0,
-      subjectState: 0.0,
-      preferredAngle: 0.0,
-      expression: 0.0,
-      colorMatch: 0.0,
-    ),
-  );
-}
 
   List<int> _convertToAnalysisBytes(CameraImage image) {
     if (image.planes.isEmpty) {
@@ -232,7 +240,9 @@ class FlutterCameraAdapter implements CameraPort {
     required double iso,
     required double shutterSeconds,
   }) {
-    if (defaultTargetPlatform != TargetPlatform.iOS) return Future<void>.value();
+    if (defaultTargetPlatform != TargetPlatform.iOS) {
+      return Future<void>.value();
+    }
     return _proChannel.invokeMethod<void>('setManualExposure', {
       'iso': iso,
       'duration': shutterSeconds,
@@ -241,14 +251,20 @@ class FlutterCameraAdapter implements CameraPort {
 
   @override
   Future<void> setManualFocus(double position) {
-    if (defaultTargetPlatform != TargetPlatform.iOS) return Future<void>.value();
+    if (defaultTargetPlatform != TargetPlatform.iOS) {
+      return Future<void>.value();
+    }
     return _proChannel.invokeMethod<void>('setManualFocus', position);
   }
 
   @override
   Future<void> setWhiteBalance(double kelvin) {
-    if (defaultTargetPlatform != TargetPlatform.iOS) return Future<void>.value();
-    return _proChannel.invokeMethod<void>('setWhiteBalance', {'kelvin': kelvin});
+    if (defaultTargetPlatform != TargetPlatform.iOS) {
+      return Future<void>.value();
+    }
+    return _proChannel.invokeMethod<void>('setWhiteBalance', {
+      'kelvin': kelvin,
+    });
   }
 
   @override
