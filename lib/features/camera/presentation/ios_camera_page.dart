@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:camera/camera.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:image/image.dart' as img;
 import 'package:flutter/gestures.dart';
 import 'package:video_player_win/video_player_win.dart';
 import 'package:video_player/video_player.dart' as vp;
@@ -968,6 +970,129 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       return null;
     }
     return output.path;
+  }
+
+  Future<void> _showImageEditor(String sourcePath) async {
+    final sourceFile = File(sourcePath);
+    if (!await sourceFile.exists()) {
+      _showAiTip('⚠️ 找不到要編輯的照片');
+      return;
+    }
+
+    final original = img.decodeImage(await sourceFile.readAsBytes());
+    if (original == null || !mounted) {
+      _showAiTip('⚠️ 照片格式無法編輯');
+      return;
+    }
+
+    var brightness = 0.0;
+    var rotation = 0;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final preview = img.adjustColor(
+              img.copyRotate(original, angle: rotation),
+              brightness: brightness,
+            );
+            return AlertDialog(
+              backgroundColor: const Color(0xFF171717),
+              title: const Text('照片調整', style: TextStyle(color: Colors.white)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      height: 260,
+                      child: Image.memory(
+                        Uint8List.fromList(img.encodeJpg(preview, quality: 90)),
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        const Icon(Icons.brightness_6, color: Colors.white70),
+                        Expanded(
+                          child: Slider(
+                            value: brightness,
+                            min: -80,
+                            max: 80,
+                            divisions: 32,
+                            activeColor: Colors.yellowAccent,
+                            onChanged: (value) =>
+                                setDialogState(() => brightness = value),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        const Text(
+                          '旋轉',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          onPressed: () => setDialogState(
+                            () => rotation = (rotation + 90) % 360,
+                          ),
+                          icon: const Icon(
+                            Icons.rotate_right,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final edited = img.adjustColor(
+                      img.copyRotate(original, angle: rotation),
+                      brightness: brightness,
+                    );
+                    final editedPath =
+                        '${sourceFile.parent.path}${Platform.pathSeparator}'
+                        'edited_${DateTime.now().microsecondsSinceEpoch}.jpg';
+                    await File(editedPath).writeAsBytes(img.encodeJpg(edited));
+                    final capturedIndex = _capturedImages.indexOf(sourcePath);
+                    final savedIndex = _savedImages.indexOf(sourcePath);
+                    if (capturedIndex >= 0) {
+                      _capturedImages[capturedIndex] = editedPath;
+                    }
+                    if (savedIndex >= 0) {
+                      _savedImages[savedIndex] = editedPath;
+                    }
+                    final liveVideo = _livePhotoVideos.remove(sourcePath);
+                    if (liveVideo != null) {
+                      _livePhotoVideos[editedPath] = liveVideo;
+                    }
+                    await _persistImageLists();
+                    try {
+                      await Gal.putImage(editedPath);
+                    } catch (error, stackTrace) {
+                      debugPrint('Edited image gallery save failed: $error');
+                      debugPrint('$stackTrace');
+                    }
+                    if (mounted) setState(() {});
+                    if (dialogContext.mounted) Navigator.pop(dialogContext);
+                    _showAiTip('✅ 照片調整已保存');
+                  },
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _exitUploadedVideo() async {
@@ -3637,6 +3762,29 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                       ),
                     ),
                   ),
+                  Positioned(
+                    top: 40,
+                    left: 20,
+                    child: Material(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      shape: const CircleBorder(),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.tune,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                        tooltip: '編輯照片',
+                        onPressed: () {
+                          if (!isAnimating &&
+                              currentIndex >= 0 &&
+                              currentIndex < galleryImages.length) {
+                            _showImageEditor(galleryImages[currentIndex]);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
                 ],
               ),
             );
@@ -4048,7 +4196,11 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                 color: Colors.grey[900],
                 child: Stack(
                   children: [
-                    Center(
+                    Positioned(
+                      top: 96,
+                      left: 0,
+                      right: 0,
+                      bottom: 180,
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onTapUp: (details) {
@@ -4262,46 +4414,40 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                   ),
                                 ],
                               )
-                            : Padding(
-                                padding: const EdgeInsets.only(
-                                  top: 108,
-                                  bottom: 188,
-                                ),
-                                child: SizedBox.expand(
-                                  key: _previewKey,
-                                  child: ClipRect(
-                                    child: Stack(
-                                      fit: StackFit.expand,
-                                      children: [
-                                        _buildCameraPreview(),
-                                        _buildPreviewEffectOverlay(),
-                                        _buildFocusOverlay(),
-                                        _buildLevelOverlay(),
-                                        _buildProOverlay(),
-                                        CustomPaint(
-                                          painter: CompositionGridPainter(
-                                            _compositionGrid,
-                                          ),
+                            : SizedBox.expand(
+                                key: _previewKey,
+                                child: ClipRect(
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      _buildCameraPreview(),
+                                      _buildPreviewEffectOverlay(),
+                                      _buildFocusOverlay(),
+                                      _buildLevelOverlay(),
+                                      _buildProOverlay(),
+                                      CustomPaint(
+                                        painter: CompositionGridPainter(
+                                          _compositionGrid,
                                         ),
-                                        if (_timerCountdown > 0)
-                                          Center(
-                                            child: Text(
-                                              '$_timerCountdown',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 72,
-                                                fontWeight: FontWeight.w300,
-                                                shadows: [
-                                                  Shadow(
-                                                    color: Colors.black,
-                                                    blurRadius: 8,
-                                                  ),
-                                                ],
-                                              ),
+                                      ),
+                                      if (_timerCountdown > 0)
+                                        Center(
+                                          child: Text(
+                                            '$_timerCountdown',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 72,
+                                              fontWeight: FontWeight.w300,
+                                              shadows: [
+                                                Shadow(
+                                                  color: Colors.black,
+                                                  blurRadius: 8,
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                      ],
-                                    ),
+                                        ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -5148,9 +5294,15 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                 },
 
                                 child: GestureDetector(
-                                  onTap: _livePhotoVideos.containsKey(itemPath)
-                                      ? () => _showLivePhotoPreview(itemPath)
-                                      : null,
+                                  onTap: () {
+                                    if (_livePhotoVideos.containsKey(
+                                      itemPath,
+                                    )) {
+                                      _showLivePhotoPreview(itemPath);
+                                    } else {
+                                      _showEnlargedGallery(index);
+                                    }
+                                  },
                                   onLongPress: () =>
                                       _showEnlargedGallery(index),
 

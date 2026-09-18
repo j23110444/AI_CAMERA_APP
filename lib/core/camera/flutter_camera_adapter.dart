@@ -54,7 +54,12 @@ class FlutterCameraAdapter implements CameraPort {
         .where((camera) => camera.lensDirection == CameraLensDirection.back)
         .toList();
     final preferredRear = rearCameras.firstWhere(
-      (camera) => !camera.name.toLowerCase().contains('ultra'),
+      (camera) {
+        final name = camera.name.toLowerCase();
+        return !name.contains('ultra') &&
+            !name.contains('ultrawide') &&
+            !name.contains('tele');
+      },
       orElse: () => rearCameras.isNotEmpty ? rearCameras.first : cameras.first,
     );
     _cameras = cameras;
@@ -65,7 +70,7 @@ class FlutterCameraAdapter implements CameraPort {
   Future<void> _initializeController(CameraDescription camera) async {
     _controller = CameraController(
       camera,
-      ResolutionPreset.high,
+      ResolutionPreset.veryHigh,
       enableAudio: false,
     );
 
@@ -111,10 +116,12 @@ class FlutterCameraAdapter implements CameraPort {
         .toList();
     final ultraWide = rearCameras.where((entry) {
       final name = entry.value.name.toLowerCase();
-      return name.contains('ultra') ||
-          name.contains('wide') ||
-          name.contains('2x') ||
-          RegExp(r'\b2\b').hasMatch(name);
+      return name.contains('ultrawide') ||
+          name.contains('ultra wide') ||
+          name.contains('ultra-wide') ||
+          name.contains('0.5') ||
+          name.contains('0_5') ||
+          name.contains('camera 2');
     }).toList();
     final candidates = ultraWide.isNotEmpty
         ? ultraWide
@@ -129,7 +136,7 @@ class FlutterCameraAdapter implements CameraPort {
     _cameraIndex = candidates.first.key;
     _previousAnalysisFrame = null;
     _sceneChangeTracker.reset();
-    await _initializeController(ultraWide.first.value);
+    await _initializeController(candidates.first.value);
   }
 
   @override
