@@ -5,6 +5,9 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
 
   private let channelName = "ai_camera/pro"
   private let cameraManager = ProCameraManager()
+  private func cameraPosition(from value: String) -> AVCaptureDevice.Position {
+    value == "front" ? .front : .back
+  }
 
   static func register(with registrar: FlutterPluginRegistrar) {
     let instance = ProCameraBridge()
@@ -29,11 +32,11 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
       case "startNativeCamera":
         let args = call.arguments as? [String: Any]
 
-        let position = args?["position"] as? String ?? "back"
+        let positionString = args?["position"] as? String ?? "back"
         let lensType = args?["lensType"] as? String ?? "wide"
 
         try cameraManager.start(
-          position: position,
+          position: cameraPosition(from: positionString),
           lensType: lensType
         )
 
@@ -52,11 +55,11 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
           )
         }
 
-        let position = args["position"] as? String ?? "back"
+        let positionString = args["position"] as? String ?? "back"
         let lensType = args["lensType"] as? String ?? "wide"
 
         try cameraManager.selectCamera(
-          position: position,
+          position: cameraPosition(from: positionString),
           lensType: lensType
         )
 
@@ -123,7 +126,7 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
         let position = (args?["position"] as? NSNumber)?.floatValue ?? 0.5
 
         try cameraManager.setFocus(
-          mode: mode,
+          mode,
           position: position
         )
 
@@ -151,11 +154,10 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
       case "setWhiteBalance":
         let args = call.arguments as? [String: Any]
 
-        let mode = args?["mode"] as? String ?? "locked"
-        let kelvin = (args?["kelvin"] as? NSNumber)?.floatValue ?? 5200
+        let kelvin =
+          (args?["kelvin"] as? NSNumber)?.floatValue ?? 5200
 
         try cameraManager.setWhiteBalance(
-          mode: mode,
           kelvin: kelvin
         )
 
@@ -170,7 +172,9 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
       case "setHDR":
         let enabled = (call.arguments as? NSNumber)?.boolValue ?? false
 
-        try cameraManager.setHDR(enabled)
+        try cameraManager.setHDR(
+          enabled: enabled
+        )
 
         result(nil)
 
@@ -179,7 +183,9 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
       case "setFlashMode":
         let mode = call.arguments as? String ?? "auto"
 
-        try cameraManager.setFlashMode(mode)
+        try cameraManager.setFlashMode(
+          mode: mode
+        )
 
         result(nil)
 
