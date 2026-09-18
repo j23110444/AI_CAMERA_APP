@@ -83,7 +83,7 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
             device.setFocusModeLocked(lensPosition: position)
           } else {
             let focusMode: AVCaptureDevice.FocusMode =
-              mode == "auto" ? .auto : .continuousAutoFocus
+              mode == "auto" ? .autoFocus : .continuousAutoFocus
             guard device.isFocusModeSupported(focusMode) else {
               throw BridgeError.unsupported("裝置不支援指定對焦模式")
             }
@@ -126,7 +126,7 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
         result(nil)
       case "setHDR":
         try withSelectedDevice { device in
-          guard device.isVideoHDREnabledSupported else {
+          guard device.activeFormat.isVideoHDRSupported else {
             throw BridgeError.unsupported("裝置不支援 HDR")
           }
           device.automaticallyAdjustsVideoHDREnabled = false
@@ -176,7 +176,7 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
         "position": device.position == .front ? "front" : "back",
         "lensType": lensType(for: device),
         "maxZoom": device.activeFormat.videoMaxZoomFactor,
-        "hdrSupported": device.isVideoHDREnabledSupported,
+        "hdrSupported": device.activeFormat.isVideoHDRSupported,
         "hasFlash": device.hasFlash,
         "hasTorch": device.hasTorch
       ]
