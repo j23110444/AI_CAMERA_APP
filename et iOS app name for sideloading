@@ -1,0 +1,36 @@
+warning: in the working copy of 'test/core/ai_core_test.dart', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/ios/Runner/Info.plist b/ios/Runner/Info.plist[m
+[1mindex 50443d3..cbdb726 100644[m
+[1m--- a/ios/Runner/Info.plist[m
+[1m+++ b/ios/Runner/Info.plist[m
+[36m@@ -15,7 +15,7 @@[m
+ 	<key>CFBundleInfoDictionaryVersion</key>[m
+ 	<string>6.0</string>[m
+ 	<key>CFBundleName</key>[m
+[31m-	<string>ai_camera_app</string>[m
+[32m+[m	[32m<string>AICamera</string>[m
+ 	<key>CFBundlePackageType</key>[m
+ 	<string>APPL</string>[m
+ 	<key>CFBundleShortVersionString</key>[m
+[1mdiff --git a/pubspec.yaml b/pubspec.yaml[m
+[1mindex dc8cbcf..c4289d4 100644[m
+[1m--- a/pubspec.yaml[m
+[1m+++ b/pubspec.yaml[m
+[36m@@ -1,4 +1,4 @@[m
+[31m-name: aicamera[m
+[32m+[m[32mname: ai_camera_app[m
+ description: "A new Flutter project."[m
+ publish_to: 'none'[m
+ [m
+[1mdiff --git a/test/core/ai_core_test.dart b/test/core/ai_core_test.dart[m
+[1mindex 5c6c015..f1b33bd 100644[m
+[1m--- a/test/core/ai_core_test.dart[m
+[1m+++ b/test/core/ai_core_test.dart[m
+[36m@@ -1,6 +1,6 @@[m
+ import 'package:test/test.dart';[m
+ [m
+[31m-import 'package:aicamera/core/core.dart';[m
+[32m+[m[32mimport 'package:ai_camera_app/core/core.dart';[m
+ [m
+ void main() {[m
+   group('MomentScorer', () {[m

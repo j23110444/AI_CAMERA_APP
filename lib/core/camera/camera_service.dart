@@ -7,6 +7,8 @@ class CameraService {
   const CameraService(this.port);
 
   Future<void> initialize() => port.initialize();
+  Future<void> switchCamera() => port.switchCamera();
+  Future<void> switchToUltraWide() => port.switchToUltraWide();
   Future<void> dispose() => port.dispose();
   Future<void> setZoom(double value) => port.setZoom(value);
   Future<void> setExposure(double value) => port.setExposure(value);

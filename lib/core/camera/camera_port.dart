@@ -21,6 +21,8 @@ abstract class CameraPort {
   Stream<CameraMetrics> get metrics;
 
   Future<void> initialize();
+  Future<void> switchCamera();
+  Future<void> switchToUltraWide();
   Future<void> dispose();
 
   Future<void> setZoom(double value);

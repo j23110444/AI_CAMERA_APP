@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:camera/camera.dart';
 import 'package:flutter/gestures.dart';
 import 'package:video_player_win/video_player_win.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 import '../../../core/core.dart';
 import '../../../core/application/video_smart_capture_service.dart';
@@ -24,6 +26,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
 
   String _currentMode = '拍照'; // 影片、拍照、物景
   bool _isCapturing = false;
+  bool _captureAnimation = false;
   
   
   bool _isRecording = false;
@@ -45,8 +48,10 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       VideoSmartCaptureService();
   final FlutterCameraAdapter _cameraAdapter = FlutterCameraAdapter();
   StreamSubscription<CameraMetrics>? _metricsSubscription;
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
   CameraMetrics? _cameraMetrics;
   bool _cameraInitializing = true;
+  bool _cameraSwitching = false;
   String? _cameraError;
   bool _proModeEnabled = false;
   bool _histogramEnabled = false;
@@ -102,6 +107,7 @@ final List<String> _savedImages = [];
 
   bool _nightMode = false;        // 夜間模式
   bool _levelEnabled = false;
+  double _levelAngle = 0.0;
   bool _hdrEnabled = false;
   bool _livePhotoEnabled = false;
   int _timerSeconds = 0;
@@ -152,6 +158,11 @@ final List<String> _savedImages = [];
     _metricsSubscription = _cameraAdapter.metrics.listen((metrics) {
       if (mounted) setState(() => _cameraMetrics = metrics);
     });
+    _accelerometerSubscription = accelerometerEventStream().listen((event) {
+      if (!mounted) return;
+      final angle = math.atan2(event.y, event.x) + math.pi / 2;
+      setState(() => _levelAngle = angle);
+    });
     _initializeCamera();
   }
 
@@ -172,7 +183,49 @@ final List<String> _savedImages = [];
         _cameraError = error.toString();
       });
     }
+
   }
+
+  Future<void> _switchCamera() async {
+      if (_cameraSwitching || _cameraInitializing) return;
+      setState(() => _cameraSwitching = true);
+      try {
+        await _cameraAdapter.switchCamera();
+        if (!mounted) return;
+        setState(() {
+          _zoomLevel = 1.0;
+          _focusPoint = null;
+          _isFocusVisible = false;
+          _isAeAfLocked = false;
+        });
+        _showAiTip('🔄 已切換鏡頭');
+      } catch (error) {
+        if (mounted) _showAiTip('⚠️ 鏡頭切換失敗：$error');
+      } finally {
+        if (mounted) setState(() => _cameraSwitching = false);
+      }
+  }
+
+  Future<void> _switchToUltraWide() async {
+        if (_cameraSwitching || _cameraInitializing) return;
+        setState(() => _cameraSwitching = true);
+        try {
+          await _cameraAdapter.switchToUltraWide();
+          if (!mounted) return;
+          setState(() {
+            _zoomLevel = 1.0;
+            _focusPoint = null;
+            _isFocusVisible = false;
+            _isAeAfLocked = false;
+          });
+          _showAiTip('🔭 已切換至 0.5x 超廣角');
+        } catch (error) {
+          if (mounted) _showAiTip('⚠️ 0.5x 超廣角無法使用：$error');
+        } finally {
+          if (mounted) setState(() => _cameraSwitching = false);
+        }
+  }
+
 Future<void> _loadSavedImageLists() async {
   final prefs = await SharedPreferences.getInstance();
 
@@ -226,6 +279,7 @@ Future<void> _loadSavedImageLists() async {
     _aiTipTimer?.cancel();
     _focusTimer?.cancel();
     _metricsSubscription?.cancel();
+    _accelerometerSubscription?.cancel();
     _videoPlayerController?.dispose();
     _cameraAdapter.dispose();
     _promptController.dispose();
@@ -367,6 +421,10 @@ Future<void> _loadSavedImageLists() async {
       setState(() {
         _capturedImages.add(path);
         _isCapturing = false;
+        _captureAnimation = true;
+      });
+      Timer(const Duration(milliseconds: 550), () {
+        if (mounted) setState(() => _captureAnimation = false);
       });
       await _persistImageLists();
       _showAiTip('📷 拍攝完成');
@@ -436,7 +494,7 @@ Future<void> _loadSavedImageLists() async {
     }
 
     if ((details.scale - 1).abs() > 0.01) {
-      final nextZoom = (_baseZoom * details.scale).clamp(0.5, 5.0);
+      final nextZoom =       (_baseZoom * details.scale).clamp(1.0, 5.0);
       if (_zoomLevel != nextZoom) {
         setState(() => _zoomLevel = nextZoom);
         unawaited(_cameraAdapter.setZoom(nextZoom));
@@ -1232,13 +1290,13 @@ Future<bool> _saveCandidateToGallery(
   Color? get _previewFilterOverlay {
     switch (_filterMode) {
       case '鮮明':
-        return Colors.orange.withValues(alpha: 0.10);
+        return Colors.orange.withValues(alpha: 0.06);
       case '溫暖':
-        return Colors.amber.withValues(alpha: 0.16);
+        return Colors.amber.withValues(alpha: 0.08);
       case '冷色':
-        return Colors.blue.withValues(alpha: 0.16);
+        return Colors.blue.withValues(alpha: 0.08);
       case '復古':
-        return Colors.brown.withValues(alpha: 0.18);
+        return Colors.brown.withValues(alpha: 0.10);
       default:
         return null;
     }
@@ -1249,7 +1307,7 @@ Future<bool> _saveCandidateToGallery(
 
     final opacity =
         (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12)).clamp(0.04, 0.21);
-    return _paletteColor(_selectedPalette).withValues(alpha: opacity);
+    return _paletteColor(_selectedPalette).withValues(alpha: opacity * 0.65);
   }
 
   Widget _buildPreviewEffectOverlay() {
@@ -1278,6 +1336,40 @@ Future<bool> _saveCandidateToGallery(
             ColoredBox(color: nightOverlay),
         ],
       ),
+    );
+  }
+
+  Widget _buildCameraPreview() {
+    final controller = _cameraAdapter.controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return Center(
+        child: _cameraInitializing
+            ? const CircularProgressIndicator(color: Colors.yellowAccent)
+            : Text(
+                _cameraError == null ? '相機尚未就緒' : '無法啟用相機\n$_cameraError',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white54, fontSize: 14),
+              ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final previewAspectRatio = controller.value.aspectRatio;
+        final width = constraints.maxWidth;
+        final height = width / previewAspectRatio;
+        return ClipRect(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: width,
+              height: height,
+              child: CameraPreview(controller),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1375,25 +1467,32 @@ Future<bool> _saveCandidateToGallery(
     return IgnorePointer(
       child: Align(
         alignment: Alignment.center,
-        child: SizedBox(
-          width: 150,
-          child: Row(
-            children: [
-              Expanded(
-                child: Container(height: 1, color: Colors.yellowAccent),
-              ),
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.yellowAccent, width: 1.5),
+        child: Transform.rotate(
+          angle: _levelAngle,
+          child: SizedBox(
+            width: 150,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(height: 2, color: Colors.yellowAccent),
                 ),
-              ),
-              Expanded(
-                child: Container(height: 1, color: Colors.yellowAccent),
-              ),
-            ],
+                Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.black54,
+                    border: Border.all(
+                      color: Colors.yellowAccent,
+                      width: 1.5,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Container(height: 2, color: Colors.yellowAccent),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -4244,41 +4343,11 @@ void _showPhotoAlbum() {
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
-                                 if (_cameraAdapter.controller != null &&
-                                     _cameraAdapter.controller!.value.isInitialized)
-                                   Transform.scale(
-                                     alignment: Alignment.center,
-                                     scale: _zoomLevel,
-                                     child: CameraPreview(_cameraAdapter.controller!),
-                                   )
-                                 else
-                                   Center(
-                                     child: _cameraInitializing
-                                         ? const CircularProgressIndicator(
-                                             color: Colors.yellowAccent,
-                                           )
-                                         : Column(
-                                             mainAxisSize: MainAxisSize.min,
-                                             children: [
-                                               const Icon(
-                                                 Icons.camera_alt_outlined,
-                                                 color: Colors.white38,
-                                                 size: 48,
-                                               ),
-                                               const SizedBox(height: 12),
-                                               Text(
-                                                 _cameraError == null
-                                                     ? '相機尚未就緒'
-                                                     : '無法啟用相機\n$_cameraError',
-                                                 textAlign: TextAlign.center,
-                                                 style: const TextStyle(
-                                                   color: Colors.white54,
-                                                   fontSize: 14,
-                                                 ),
-                                               ),
-                                             ],
-                                           ),
-                                   ),
+                                 Transform.scale(
+                                   alignment: Alignment.center,
+                                   scale: _zoomLevel,
+                                   child: _buildCameraPreview(),
+                                 ),
                                   _buildPreviewEffectOverlay(),
                                   _buildFocusOverlay(),
                                   _buildLevelOverlay(),
@@ -4371,9 +4440,11 @@ void _showPhotoAlbum() {
                         // 中央：濾鏡 / 調色盤
                         // ─────────────────────────
                        if (!_isRecording && _activeUploadedVideo == null)
-                      Transform.translate(
-                        offset: const Offset(0, 10),
-                        child: Column(
+                          Flexible(
+                            flex: 3,
+                            child: Transform.translate(
+                         offset: const Offset(0, 10),
+                         child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               // ─────────────────────────
@@ -4551,6 +4622,7 @@ void _showPhotoAlbum() {
                             ],
                           ),
                       ),
+                           ),
                         // ─────────────────────────
                         // 右側：影片上傳 + 閃光燈
                         // ─────────────────────────
@@ -5139,6 +5211,38 @@ void _showPhotoAlbum() {
                     ),
             ),
 
+            if (_captureAnimation)
+              Positioned(
+                right: 82,
+                bottom: 150,
+                child: IgnorePointer(
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.7, end: 1.0),
+                    duration: const Duration(milliseconds: 450),
+                    builder: (context, scale, child) => Transform.scale(
+                      scale: scale,
+                      child: child,
+                    ),
+                    child: Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white, width: 2),
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black54, blurRadius: 8),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.photo_camera,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
             // 5. 下方控制區
             Positioned(
               bottom: 30,
@@ -5235,9 +5339,13 @@ void _showPhotoAlbum() {
                             });
                           },
                           onHorizontalDragUpdate: (details) {
+                            final nextZoom = (_zoomLevel -
+                                    details.primaryDelta! * 0.003)
+                                .clamp(1.0, 5.0);
                             setState(() {
-                              _zoomLevel = (_zoomLevel - details.primaryDelta! * 0.003).clamp(0.5, 5.0);
+                              _zoomLevel = nextZoom;
                             });
+                            unawaited(_cameraAdapter.setZoom(nextZoom));
                           },
                           onHorizontalDragEnd: (details) {
                             setState(() {
@@ -5256,7 +5364,10 @@ void _showPhotoAlbum() {
                               mainAxisAlignment: MainAxisAlignment.center,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                _buildZoomLabelButton(0.5, '0.5x'),
+                                _buildLensLabelButton(
+                                  '0.5x',
+                                  _switchToUltraWide,
+                                ),
                                 const SizedBox(width: 16),
                                 _buildZoomLabelButton(1.0, '1x'),
                                 const SizedBox(width: 16),
@@ -5304,16 +5415,22 @@ void _showPhotoAlbum() {
                                 '✨ AI 已切換至 [$_currentMode] 模式',
                               );
                             },
-                            child: Text(
-                              mode,
-                              style: TextStyle(
-                                color: isSelected
-                                    ? Colors.yellowAccent
-                                    : Colors.white60,
-                                fontSize: 16,
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
+                            child: AnimatedScale(
+                              scale: isSelected ? 1.12 : 1.0,
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeOutBack,
+                              child: AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 180),
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.yellowAccent
+                                      : Colors.white60,
+                                  fontSize: 16,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                                child: Text(mode),
                               ),
                             ),
                           ),
@@ -5407,14 +5524,30 @@ void _showPhotoAlbum() {
                             ),
                           ),
                         ),
-                        Container(
+                        GestureDetector(
+                          onTap: _switchCamera,
+                          child: Container(
                           width: 50,
                           height: 50,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: Colors.grey[800]?.withValues(alpha: 0.6),
                           ),
-                          child: const Icon(Icons.cameraswitch, color: Colors.white, size: 26),
+                          child: _cameraSwitching
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.yellowAccent,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.cameraswitch,
+                                  color: Colors.white,
+                                  size: 26,
+                                ),
+                          ),
                         ),
                       ],
                     ),
@@ -5435,6 +5568,7 @@ void _showPhotoAlbum() {
         setState(() {
           _zoomLevel = targetZoom;
         });
+        unawaited(_cameraAdapter.setZoom(targetZoom));
         _showAiTip('🔍 變焦倍數調整至：$label');
       },
       child: Text(
@@ -5443,6 +5577,19 @@ void _showPhotoAlbum() {
           color: isSelected ? Colors.yellowAccent : Colors.white60,
           fontSize: 13,
           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLensLabelButton(String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white60,
+          fontSize: 13,
         ),
       ),
     );

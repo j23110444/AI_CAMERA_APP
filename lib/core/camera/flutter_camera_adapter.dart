@@ -11,6 +11,8 @@ import '../domain/scene_change_tracker.dart';
 class FlutterCameraAdapter implements CameraPort {
   static const MethodChannel _proChannel = MethodChannel('ai_camera/pro');
   CameraController? _controller;
+  List<CameraDescription> _cameras = const [];
+  int _cameraIndex = 0;
 
   final StreamController<List<int>> _analysisFrameController =
       StreamController<List<int>>.broadcast();
@@ -49,17 +51,76 @@ class FlutterCameraAdapter implements CameraPort {
       throw StateError('找不到可用的相機');
     }
 
-    final camera = cameras.first;
+    final rearCameras = cameras
+        .where((camera) => camera.lensDirection == CameraLensDirection.back)
+        .toList();
+    final preferredRear = rearCameras.firstWhere(
+      (camera) => !camera.name.toLowerCase().contains('ultra'),
+      orElse: () => rearCameras.isNotEmpty ? rearCameras.first : cameras.first,
+    );
+    _cameras = cameras;
+    _cameraIndex = cameras.indexOf(preferredRear);
+    await _initializeController(preferredRear);
+  }
 
+  Future<void> _initializeController(CameraDescription camera) async {
     _controller = CameraController(
       camera,
-      ResolutionPreset.low,
+      ResolutionPreset.high,
       enableAudio: false,
     );
 
     await _controller!.initialize();
 
     await _controller!.startImageStream(_handleCameraImage);
+  }
+
+  @override
+  Future<void> switchCamera() async {
+    if (_cameras.length < 2) {
+      throw StateError('裝置沒有可切換的前後鏡頭');
+    }
+
+    final current = _cameras[_cameraIndex];
+    final desiredDirection = current.lensDirection == CameraLensDirection.back
+        ? CameraLensDirection.front
+        : CameraLensDirection.back;
+    final candidates = _cameras
+        .asMap()
+        .entries
+        .where((entry) => entry.value.lensDirection == desiredDirection)
+        .toList();
+    if (candidates.isEmpty) {
+      throw StateError('找不到相反方向的相機');
+    }
+
+    final next = candidates.first;
+    await _controller?.dispose();
+    _controller = null;
+    _cameraIndex = next.key;
+    _previousAnalysisFrame = null;
+    _sceneChangeTracker.reset();
+    await _initializeController(next.value);
+  }
+
+  @override
+  Future<void> switchToUltraWide() async {
+    final ultraWide = _cameras.asMap().entries.where((entry) {
+      final camera = entry.value;
+      return camera.lensDirection == CameraLensDirection.back &&
+          camera.name.toLowerCase().contains('ultra');
+    }).toList();
+
+    if (ultraWide.isEmpty) {
+      throw StateError('此裝置沒有可用的 0.5x 超廣角鏡頭');
+    }
+
+    await _controller?.dispose();
+    _controller = null;
+    _cameraIndex = ultraWide.first.key;
+    _previousAnalysisFrame = null;
+    _sceneChangeTracker.reset();
+    await _initializeController(ultraWide.first.value);
   }
 
   void _handleCameraImage(CameraImage image) {
@@ -194,6 +255,7 @@ class FlutterCameraAdapter implements CameraPort {
   Future<void> setFocusPoint(double x, double y) async {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
+    await controller.setFocusMode(FocusMode.auto);
     await controller.setFocusPoint(Offset(x, y));
     await controller.setExposurePoint(Offset(x, y));
   }
