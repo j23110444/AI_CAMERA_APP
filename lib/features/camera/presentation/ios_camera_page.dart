@@ -58,6 +58,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   CameraMetrics? _cameraMetrics;
   bool _cameraInitializing = true;
   bool _cameraSwitching = false;
+  bool _isUltraWideActive = false;
   String? _cameraError;
   bool _proModeEnabled = false;
   bool _histogramEnabled = false;
@@ -203,6 +204,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       if (!mounted) return;
       setState(() {
         _zoomLevel = 1.0;
+        _isUltraWideActive = false;
         _focusPoint = null;
         _isFocusVisible = false;
         _isAeAfLocked = false;
@@ -222,14 +224,15 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       await _cameraAdapter.switchToUltraWide();
       if (!mounted) return;
       setState(() {
-        _zoomLevel = 1.0;
+        _zoomLevel = 0.5;
+        _isUltraWideActive = true;
         _focusPoint = null;
         _isFocusVisible = false;
         _isAeAfLocked = false;
       });
-      _showAiTip('🔭 已切換至 0.5x 超廣角');
+      _showAiTip('📷 已切換至 0.5x 廣角');
     } catch (error) {
-      if (mounted) _showAiTip('⚠️ 0.5x 超廣角無法使用：$error');
+      if (mounted) _showAiTip('⚠️ 0.5x 廣角無法使用：$error');
     } finally {
       if (mounted) setState(() => _cameraSwitching = false);
     }
@@ -243,12 +246,13 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       if (!mounted) return;
       setState(() {
         _zoomLevel = 1.0;
+        _isUltraWideActive = false;
         _focusPoint = null;
         _isFocusVisible = false;
         _isAeAfLocked = false;
       });
     } catch (error) {
-      if (mounted) _showAiTip('⚠️ 1x 標準廣角無法使用：$error');
+      if (mounted) _showAiTip('⚠️ 1x 廣角無法使用：$error');
     } finally {
       if (mounted) setState(() => _cameraSwitching = false);
     }
@@ -4722,7 +4726,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                               ),
                             ),
                           // ─────────────────────────
-                          // 右側：影片上傳 + 閃光燈
+                          // 右側：影片上傳與功能選單
                           // ─────────────────────────
                           Expanded(
                             child: Align(
@@ -4760,94 +4764,6 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                           minHeight: 38,
                                         ),
                                         onPressed: _handleUploadVideo,
-                                      ),
-
-                                    // Live Photo／原況
-                                    if (_activeUploadedVideo == null)
-                                      GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onTap: () {
-                                          setState(() {
-                                            _livePhotoEnabled =
-                                                !_livePhotoEnabled;
-                                          });
-
-                                          _showAiTip(
-                                            _livePhotoEnabled
-                                                ? '📸 Live Photo 已開啟'
-                                                : '📸 Live Photo 已關閉',
-                                          );
-                                        },
-                                        child: SizedBox(
-                                          width: 58,
-                                          height: 38,
-                                          child: Center(
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                CustomPaint(
-                                                  size: const Size(19, 19),
-                                                  painter: LivePhotoIconPainter(
-                                                    color: _livePhotoEnabled
-                                                        ? Colors.yellowAccent
-                                                        : Colors.white,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 3),
-                                                Text(
-                                                  '原況',
-                                                  style: TextStyle(
-                                                    color: _livePhotoEnabled
-                                                        ? Colors.yellowAccent
-                                                        : Colors.white,
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-
-                                    // 閃光燈
-                                    if (_activeUploadedVideo == null)
-                                      GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onTap: () {
-                                          final nextMode = _flashMode == '自動'
-                                              ? '開'
-                                              : _flashMode == '開'
-                                              ? '關'
-                                              : '自動';
-                                          setState(() {
-                                            _flashMode = nextMode;
-                                          });
-                                          unawaited(
-                                            _cameraAdapter.setFlashMode(
-                                              nextMode == '開'
-                                                  ? 'on'
-                                                  : nextMode == '關'
-                                                  ? 'off'
-                                                  : 'auto',
-                                            ),
-                                          );
-                                        },
-                                        child: SizedBox(
-                                          width: 38,
-                                          height: 38,
-                                          child: Center(
-                                            child: Icon(
-                                              _flashMode == '開'
-                                                  ? Icons.flash_on
-                                                  : _flashMode == '關'
-                                                  ? Icons.flash_off
-                                                  : Icons.flash_auto,
-                                              color: Colors.white,
-                                              size: 21,
-                                            ),
-                                          ),
-                                        ),
                                       ),
 
                                     // 選項：2 × 3 六格圖示
@@ -5035,6 +4951,9 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                   highlight: _hdrEnabled,
                                   onTap: () {
                                     setState(() => _hdrEnabled = !_hdrEnabled);
+                                    unawaited(
+                                      _cameraAdapter.setHdrEnabled(_hdrEnabled),
+                                    );
                                     _showAiTip(
                                       _hdrEnabled ? '☀️ HDR 已開啟' : '☀️ HDR 已關閉',
                                     );
@@ -5058,6 +4977,53 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                     );
                                     _showAiTip(
                                       _levelEnabled ? '📏 水平儀已開啟' : '📏 水平儀已關閉',
+                                    );
+                                  },
+                                ),
+                                _buildIOSControlItem(
+                                  icon: _livePhotoEnabled
+                                      ? Icons.motion_photos_on
+                                      : Icons.motion_photos_off,
+                                  label: '原況',
+                                  value: _livePhotoEnabled ? '開啟' : '關閉',
+                                  highlight: _livePhotoEnabled,
+                                  onTap: () {
+                                    setState(() {
+                                      _livePhotoEnabled = !_livePhotoEnabled;
+                                    });
+                                    _showAiTip(
+                                      _livePhotoEnabled
+                                          ? '📸 原況照片已開啟'
+                                          : '📸 原況照片已關閉',
+                                    );
+                                  },
+                                ),
+                                _buildIOSControlItem(
+                                  icon: _flashMode == '開'
+                                      ? Icons.flash_on
+                                      : _flashMode == '關'
+                                      ? Icons.flash_off
+                                      : Icons.flash_auto,
+                                  label: '閃光',
+                                  value: _flashMode,
+                                  highlight: _flashMode != '自動',
+                                  onTap: () {
+                                    final nextMode = _flashMode == '自動'
+                                        ? '開'
+                                        : _flashMode == '開'
+                                        ? '關'
+                                        : '自動';
+                                    setState(() {
+                                      _flashMode = nextMode;
+                                    });
+                                    unawaited(
+                                      _cameraAdapter.setFlashMode(
+                                        nextMode == '開'
+                                            ? 'on'
+                                            : nextMode == '關'
+                                            ? 'off'
+                                            : 'auto',
+                                      ),
                                     );
                                   },
                                 ),
@@ -5530,11 +5496,17 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                           onHorizontalDragUpdate: (details) {
                             final nextZoom =
                                 (_zoomLevel - details.primaryDelta! * 0.01)
-                                    .clamp(1.0, 5.0);
+                                    .clamp(_isUltraWideActive ? 0.5 : 1.0, 5.0);
                             setState(() {
                               _zoomLevel = nextZoom;
                             });
-                            unawaited(_cameraAdapter.setZoom(nextZoom));
+                            unawaited(
+                              _cameraAdapter.setZoom(
+                                _isUltraWideActive
+                                    ? (nextZoom / 0.5).clamp(1.0, 5.0)
+                                    : nextZoom.clamp(1.0, 5.0),
+                              ),
+                            );
                           },
                           onHorizontalDragEnd: (details) {
                             setState(() {
@@ -5803,7 +5775,11 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       onTap: onTap,
       child: Text(
         label,
-        style: const TextStyle(color: Colors.white60, fontSize: 17),
+        style: TextStyle(
+          color: _isUltraWideActive ? Colors.yellowAccent : Colors.white60,
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

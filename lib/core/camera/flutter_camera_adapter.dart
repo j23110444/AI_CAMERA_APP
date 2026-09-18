@@ -68,6 +68,7 @@ class FlutterCameraAdapter implements CameraPort {
   }
 
   Future<void> _initializeController(CameraDescription camera) async {
+    await _selectNativeCamera(camera);
     _controller = CameraController(
       camera,
       ResolutionPreset.veryHigh,
@@ -77,6 +78,42 @@ class FlutterCameraAdapter implements CameraPort {
     await _controller!.initialize();
 
     await _controller!.startImageStream(_handleCameraImage);
+  }
+
+  Future<void> _selectNativeCamera(CameraDescription camera) async {
+    final lensType = camera.lensDirection == CameraLensDirection.front
+        ? 'wide'
+        : _looksLikeUltraWide(camera.name)
+        ? 'ultraWide'
+        : _looksLikeTelephoto(camera.name)
+        ? 'telephoto'
+        : 'wide';
+    try {
+      await _proChannel.invokeMethod<void>('selectCamera', {
+        'position': camera.lensDirection == CameraLensDirection.front
+            ? 'front'
+            : 'back',
+        'lensType': lensType,
+      });
+    } on MissingPluginException {
+      // The Flutter camera plugin remains the portable fallback.
+    }
+  }
+
+  bool _looksLikeUltraWide(String name) {
+    final normalized = name.toLowerCase();
+    return normalized.contains('ultra') ||
+        normalized.contains('0.5') ||
+        normalized.contains('0_5') ||
+        normalized.contains('camera 2');
+  }
+
+  bool _looksLikeTelephoto(String name) {
+    final normalized = name.toLowerCase();
+    return normalized.contains('tele') ||
+        normalized.contains('telephoto') ||
+        normalized.contains('3x') ||
+        normalized.contains('5x');
   }
 
   @override
@@ -115,28 +152,18 @@ class FlutterCameraAdapter implements CameraPort {
         .where((entry) => entry.value.lensDirection == CameraLensDirection.back)
         .toList();
     final ultraWide = rearCameras.where((entry) {
-      final name = entry.value.name.toLowerCase();
-      return name.contains('ultrawide') ||
-          name.contains('ultra wide') ||
-          name.contains('ultra-wide') ||
-          name.contains('0.5') ||
-          name.contains('0_5') ||
-          name.contains('camera 2');
+      return _looksLikeUltraWide(entry.value.name);
     }).toList();
-    final candidates = ultraWide.isNotEmpty
-        ? ultraWide
-        : rearCameras.where((entry) => entry.key != _cameraIndex).toList();
-
-    if (candidates.isEmpty) {
-      throw StateError('此裝置沒有可用的 0.5x 超廣角鏡頭');
+    if (ultraWide.isEmpty) {
+      throw StateError('此裝置沒有可辨識的 0.5x 廣角鏡頭');
     }
 
     await _controller?.dispose();
     _controller = null;
-    _cameraIndex = candidates.first.key;
+    _cameraIndex = ultraWide.first.key;
     _previousAnalysisFrame = null;
     _sceneChangeTracker.reset();
-    await _initializeController(candidates.first.value);
+    await _initializeController(ultraWide.first.value);
   }
 
   @override
@@ -258,7 +285,11 @@ class FlutterCameraAdapter implements CameraPort {
     if (controller == null || !controller.value.isInitialized) return;
     final minZoom = await controller.getMinZoomLevel();
     final maxZoom = await controller.getMaxZoomLevel();
-    await controller.setZoomLevel(value.clamp(minZoom, maxZoom).toDouble());
+    final zoom = value.clamp(minZoom, maxZoom).toDouble();
+    await controller.setZoomLevel(zoom);
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _proChannel.invokeMethod<void>('setZoom', zoom);
+    }
   }
 
   @override
@@ -266,6 +297,12 @@ class FlutterCameraAdapter implements CameraPort {
     await _controller?.setExposureOffset(value);
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       await _proChannel.invokeMethod<void>('setExposureBias', value);
+    }
+  }
+
+  Future<void> setHdrEnabled(bool enabled) async {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _proChannel.invokeMethod<void>('setHDR', enabled);
     }
   }
 
@@ -288,7 +325,10 @@ class FlutterCameraAdapter implements CameraPort {
     if (defaultTargetPlatform != TargetPlatform.iOS) {
       return Future<void>.value();
     }
-    return _proChannel.invokeMethod<void>('setManualFocus', position);
+    return _proChannel.invokeMethod<void>('setFocus', {
+      'mode': 'locked',
+      'position': position,
+    });
   }
 
   @override
@@ -308,6 +348,9 @@ class FlutterCameraAdapter implements CameraPort {
     await controller.setFocusMode(FocusMode.auto);
     await controller.setFocusPoint(Offset(x, y));
     await controller.setExposurePoint(Offset(x, y));
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _proChannel.invokeMethod<void>('setFocus', {'mode': 'auto'});
+    }
   }
 
   @override
@@ -318,6 +361,14 @@ class FlutterCameraAdapter implements CameraPort {
     await controller.setExposureMode(
       locked ? ExposureMode.locked : ExposureMode.auto,
     );
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _proChannel.invokeMethod<void>('setFocus', {
+        'mode': locked ? 'locked' : 'continuous',
+      });
+      await _proChannel.invokeMethod<void>('setExposureMode', {
+        'mode': locked ? 'locked' : 'continuous',
+      });
+    }
   }
 
   @override
@@ -345,6 +396,9 @@ class FlutterCameraAdapter implements CameraPort {
 
       default:
         await controller.setFlashMode(FlashMode.auto);
+    }
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _proChannel.invokeMethod<void>('setFlashMode', mode);
     }
   }
 
