@@ -113,7 +113,9 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
         let args = call.arguments as? [String: Any]
         let mode = args?["mode"] as? String ?? "continuous"
 
-        try cameraManager.setExposureMode(mode)
+        try cameraManager.setExposureMode(
+            mode: mode
+        )
 
         result(nil)
 
