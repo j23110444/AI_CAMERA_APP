@@ -111,6 +111,47 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
           }
         }
 
+     case "captureLivePhoto":
+
+    Task {
+
+        do {
+
+            let captureResult =
+                try await cameraManager.captureLivePhoto()
+
+            DispatchQueue.main.async {
+                result(captureResult)
+            }
+
+        } catch let error as CameraManagerError {
+
+            DispatchQueue.main.async {
+
+                result(
+                    FlutterError(
+                        code: error.code,
+                        message: error.message,
+                        details: nil
+                    )
+                )
+            }
+
+        } catch {
+
+            DispatchQueue.main.async {
+
+                result(
+                    FlutterError(
+                        code: "LIVE_PHOTO_ERROR",
+                        message: error.localizedDescription,
+                        details: nil
+                    )
+                )
+            }
+        }
+    }
+     
       case "setZoom":
         let zoom = (call.arguments as? NSNumber)?.doubleValue ?? 1.0
 

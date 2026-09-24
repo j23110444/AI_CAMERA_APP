@@ -938,54 +938,87 @@ Future<String> capturePhoto() async {
   // ---------------------------------------------------------------------------
 
   @override
-  Future<LivePhotoCapture> captureLivePhoto() async {
-    final controller = _controller;
+Future<LivePhotoCapture> captureLivePhoto() async {
+  if (_useNativeIOSCamera) {
+    final result =
+        await _proChannel.invokeMethod<Map<dynamic, dynamic>>(
+      'captureLivePhoto',
+    );
 
-    if (controller == null ||
-        !controller.value.isInitialized) {
-      throw StateError('相機尚未初始化');
-    }
-
-    if (controller.value.isRecordingVideo) {
-      throw StateError('相機正在錄影');
-    }
-
-    final wasStreaming =
-        controller.value.isStreamingImages;
-
-    if (wasStreaming) {
-      await controller.stopImageStream();
-    }
-
-    late final String photoPath;
-    late final XFile videoFile;
-
-    try {
-      photoPath =
-          (await controller.takePicture()).path;
-
-      await controller.startVideoRecording();
-
-      await Future<void>.delayed(
-        const Duration(milliseconds: 1500),
+    if (result == null) {
+      throw StateError(
+        'Live Photo 拍攝失敗：原生相機沒有回傳資料',
       );
+    }
 
-      videoFile =
-          await controller.stopVideoRecording();
-    } finally {
-      if (wasStreaming &&
-          controller.value.isInitialized) {
-        await controller.startImageStream(
-          _handleCameraImage,
-        );
-      }
+    final photoPath =
+        result['photoPath']?.toString();
+
+    final videoPath =
+        result['videoPath']?.toString();
+
+    if (photoPath == null ||
+        photoPath.isEmpty ||
+        videoPath == null ||
+        videoPath.isEmpty) {
+      throw StateError(
+        'Live Photo 拍攝失敗：照片或影片路徑無效',
+      );
     }
 
     return LivePhotoCapture(
       photoPath: photoPath,
-      videoPath: videoFile.path,
+      videoPath: videoPath,
     );
   }
+
+  final controller = _controller;
+
+  if (controller == null ||
+      !controller.value.isInitialized) {
+    throw StateError('相機尚未初始化');
+  }
+
+  if (controller.value.isRecordingVideo) {
+    throw StateError('相機正在錄影');
+  }
+
+  final wasStreaming =
+      controller.value.isStreamingImages;
+
+  if (wasStreaming) {
+    await controller.stopImageStream();
+  }
+
+  late final String photoPath;
+  late final XFile videoFile;
+
+  try {
+    photoPath =
+        (await controller.takePicture()).path;
+
+    await controller.startVideoRecording();
+
+    await Future<void>.delayed(
+      const Duration(milliseconds: 1500),
+    );
+
+    videoFile =
+        await controller.stopVideoRecording();
+  } finally {
+    if (wasStreaming &&
+        controller.value.isInitialized) {
+      await controller.startImageStream(
+        _handleCameraImage,
+      );
+    }
+  }
+
+  return LivePhotoCapture(
+    photoPath: photoPath,
+    videoPath: videoFile.path,
+  );
+}
 
   // ---------------------------------------------------------------------------
   // Burst

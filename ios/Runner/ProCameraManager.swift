@@ -13,12 +13,14 @@ final class ProCameraManager: NSObject {
 
   private(set) var currentLensType: String = "wide"
 
+  private var currentPhotoFlashMode: AVCaptureDevice.FlashMode = .off
   // MARK: - Outputs
 
   let photoOutput = AVCapturePhotoOutput()
 
   let videoOutput = AVCaptureVideoDataOutput()
 
+  let movieOutput = AVCaptureMovieFileOutput()
   // MARK: - Session Queue
 
   private let sessionQueue = DispatchQueue(
@@ -191,6 +193,11 @@ final class ProCameraManager: NSObject {
 
       session.addOutput(photoOutput)
 
+      if photoOutput.isLivePhotoCaptureSupported {
+          photoOutput.isLivePhotoCaptureEnabled = true
+          photoOutput.isLivePhotoAutoTrimmingEnabled = true
+      }
+
       if #available(iOS 16.0, *) {
         photoOutput.maxPhotoQualityPrioritization =
           .quality
@@ -320,57 +327,198 @@ final class ProCameraManager: NSObject {
   }
   // MARK: - Capture Photo
 
-  private var photoCaptureDelegate: PhotoCaptureDelegate?
+private var photoCaptureDelegate: PhotoCaptureDelegate?
 
-  func capturePhoto() async throws -> String {
+func capturePhoto() async throws -> String {
+
+  guard session.isRunning else {
+    throw CameraManagerError.cameraNotInitialized
+  }
+
+  guard session.outputs.contains(photoOutput) else {
+    throw CameraManagerError.cannotAddPhotoOutput
+  }
+
+  let settings: AVCapturePhotoSettings
+
+  if photoOutput.availablePhotoCodecTypes.contains(
+    AVVideoCodecType.jpeg
+  ) {
+    settings = AVCapturePhotoSettings(
+      format: [
+        AVVideoCodecKey: AVVideoCodecType.jpeg
+      ]
+    )
+  } else {
+    settings = AVCapturePhotoSettings()
+  }
+
+  // Photo quality
+  if photoOutput.maxPhotoQualityPrioritization == .quality {
+    settings.photoQualityPrioritization = .quality
+  }
+
+  // Photo flash
+  if let device = selectedDevice,
+     device.hasFlash,
+     photoOutput.supportedFlashModes.contains(
+       currentPhotoFlashMode
+     ) {
+    settings.flashMode = currentPhotoFlashMode
+  }
+
+  // Photo orientation
+  if let connection = photoOutput.connection(with: .video) {
+    if connection.isVideoOrientationSupported {
+      connection.videoOrientation = .portrait
+    }
+  }
+
+  return try await withCheckedThrowingContinuation {
+    (continuation: CheckedContinuation<String, Error>) in
+
+    let delegate = PhotoCaptureDelegate(
+      continuation: continuation
+    )
+
+    photoCaptureDelegate = delegate
+
+    photoOutput.capturePhoto(
+      with: settings,
+      delegate: delegate
+    )
+  }
+}
+
+// MARK: - Capture Live Photo
+
+private var livePhotoCaptureDelegate: LivePhotoCaptureDelegate?
+
+func captureLivePhoto() async throws -> [String: String] {
 
     guard session.isRunning else {
-      throw CameraManagerError.cameraNotInitialized
+        throw CameraManagerError.cameraNotInitialized
     }
 
     guard session.outputs.contains(photoOutput) else {
-      throw CameraManagerError.cannotAddPhotoOutput
+        throw CameraManagerError.cannotAddPhotoOutput
     }
+
+    guard photoOutput.isLivePhotoCaptureSupported else {
+        throw CameraManagerError.unsupported(
+            "目前鏡頭或拍攝格式不支援 Live Photo"
+        )
+    }
+
+    guard photoOutput.isLivePhotoCaptureEnabled else {
+        throw CameraManagerError.unsupported(
+            "Live Photo 尚未啟用"
+        )
+    }
+
+    let fileManager = FileManager.default
+
+    let documentsURL =
+        fileManager.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0]
+
+    let capturesURL =
+        documentsURL.appendingPathComponent(
+            "captures",
+            isDirectory: true
+        )
+
+    try fileManager.createDirectory(
+        at: capturesURL,
+        withIntermediateDirectories: true
+    )
+
+    let timestamp =
+        Int(Date().timeIntervalSince1970 * 1000)
+
+    let photoURL =
+        capturesURL.appendingPathComponent(
+            "LIVE_\(timestamp).jpg"
+        )
+
+    let movieURL =
+        capturesURL.appendingPathComponent(
+            "LIVE_\(timestamp).mov"
+        )
 
     let settings: AVCapturePhotoSettings
 
     if photoOutput.availablePhotoCodecTypes.contains(
-      AVVideoCodecType.jpeg
+        AVVideoCodecType.jpeg
     ) {
-      settings = AVCapturePhotoSettings(
-        format: [
-          AVVideoCodecKey: AVVideoCodecType.jpeg
-        ]
-      )
+        settings = AVCapturePhotoSettings(
+            format: [
+                AVVideoCodecKey: AVVideoCodecType.jpeg
+            ]
+        )
     } else {
-      settings = AVCapturePhotoSettings()
+        settings = AVCapturePhotoSettings()
     }
 
+    // Photo quality
     if photoOutput.maxPhotoQualityPrioritization == .quality {
-      settings.photoQualityPrioritization = .quality
+        settings.photoQualityPrioritization = .quality
     }
 
-    if let connection = photoOutput.connection(with: .video) {
-      if connection.isVideoOrientationSupported {
-        connection.videoOrientation = .portrait
-      }
+    // Flash
+    if let device = selectedDevice,
+       device.hasFlash,
+       photoOutput.supportedFlashModes.contains(
+           currentPhotoFlashMode
+       ) {
+
+        settings.flashMode = currentPhotoFlashMode
+    }
+
+    // Live Photo movie
+    settings.livePhotoMovieFileURL = movieURL
+
+    if let codec =
+        photoOutput.availableLivePhotoVideoCodecTypes.first {
+
+        settings.livePhotoVideoCodecType = codec
+    }
+
+    // Orientation
+    if let connection = photoOutput.connection(
+        with: .video
+    ) {
+
+        if connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
+        }
     }
 
     return try await withCheckedThrowingContinuation {
-      (continuation: CheckedContinuation<String, Error>) in
+        (
+            continuation: CheckedContinuation<
+                [String: String],
+                Error
+            >
+        ) in
 
-      let delegate = PhotoCaptureDelegate(
-        continuation: continuation
-      )
+        let delegate = LivePhotoCaptureDelegate(
+            continuation: continuation,
+            photoURL: photoURL,
+            movieURL: movieURL
+        )
 
-      photoCaptureDelegate = delegate
+        livePhotoCaptureDelegate = delegate
 
-      photoOutput.capturePhoto(
-        with: settings,
-        delegate: delegate
-      )
+        photoOutput.capturePhoto(
+            with: settings,
+            delegate: delegate
+        )
     }
-  }
+}
+
   // MARK: - Zoom
 
   func setZoom(_ value: Double) throws {
@@ -748,67 +896,73 @@ final class ProCameraManager: NSObject {
     device.isVideoHDREnabled = enabled
   }
 
-  // MARK: - Flash
+  // MARK: - Flash / Torch
 
-  func setFlashMode(
-    mode: String
-  ) throws {
+func setFlashMode(
+  mode: String
+) throws {
 
-    guard let device = selectedDevice else {
-      throw CameraManagerError.cameraNotInitialized
-    }
+  guard let device = selectedDevice else {
+    throw CameraManagerError.cameraNotInitialized
+  }
 
-    guard device.hasFlash || device.hasTorch else {
+  guard device.hasFlash || device.hasTorch else {
+    throw CameraManagerError.unsupported(
+      "目前鏡頭沒有閃光燈或手電筒"
+    )
+  }
+
+  try device.lockForConfiguration()
+
+  defer {
+    device.unlockForConfiguration()
+  }
+
+  switch mode {
+
+  case "torch":
+
+    guard device.hasTorch else {
       throw CameraManagerError.unsupported(
-        "目前鏡頭沒有閃光燈"
+        "目前鏡頭不支援手電筒"
       )
     }
 
-    try device.lockForConfiguration()
+    device.torchMode = .on
 
-    defer {
-      device.unlockForConfiguration()
+  case "on":
+
+    currentPhotoFlashMode = .on
+
+    if device.hasTorch {
+      device.torchMode = .off
     }
 
-    switch mode {
+  case "auto":
 
-    case "torch":
+    currentPhotoFlashMode = .auto
 
-      guard device.hasTorch else {
-        throw CameraManagerError.unsupported(
-          "目前鏡頭不支援手電筒"
-        )
-      }
+    if device.hasTorch {
+      device.torchMode = .off
+    }
 
-      try device.setTorchModeOn(
-        level: AVCaptureDevice.maxAvailableTorchLevel
-      )
+  case "off":
 
-    case "on":
+    currentPhotoFlashMode = .off
 
-      if device.hasTorch {
-        device.torchMode = .off
-      }
+    if device.hasTorch {
+      device.torchMode = .off
+    }
 
-    case "off":
+  default:
 
-      if device.hasTorch {
-        device.torchMode = .off
-      }
+    currentPhotoFlashMode = .off
 
-    case "auto":
-
-      if device.hasTorch {
-        device.torchMode = .off
-      }
-
-    default:
-
-      if device.hasTorch {
-        device.torchMode = .off
-      }
+    if device.hasTorch {
+      device.torchMode = .off
     }
   }
+}
 
   // MARK: - Camera Information
 
@@ -896,6 +1050,164 @@ final class ProCameraManager: NSObject {
     }
   }
 }
+
+private final class LivePhotoCaptureDelegate:
+    NSObject,
+    AVCapturePhotoCaptureDelegate {
+
+    private let continuation:
+        CheckedContinuation<[String: String], Error>
+
+    private let photoURL: URL
+    private let movieURL: URL
+
+    private var photoPath: String?
+    private var moviePath: String?
+
+    private var finished = false
+
+    init(
+        continuation:
+            CheckedContinuation<[String: String], Error>,
+        photoURL: URL,
+        movieURL: URL
+    ) {
+
+        self.continuation = continuation
+        self.photoURL = photoURL
+        self.movieURL = movieURL
+
+        super.init()
+    }
+
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        error: Error?
+    ) {
+
+        if let error = error {
+            finish(
+                throwing: error
+            )
+            return
+        }
+
+        guard let data = photo.fileDataRepresentation()
+        else {
+            finish(
+                throwing:
+                    CameraManagerError.unsupported(
+                        "無法取得 Live Photo 照片資料"
+                    )
+            )
+            return
+        }
+
+        do {
+
+            try data.write(
+                to: photoURL,
+                options: .atomic
+            )
+
+            photoPath = photoURL.path
+
+            tryFinish()
+
+        } catch {
+
+            finish(
+                throwing: error
+            )
+        }
+    }
+
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingLivePhotoToMovieFileAt fileURL: URL,
+        duration: CMTime,
+        photoDisplayTime: CMTime,
+        resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
+
+        if let error = error {
+            finish(
+                throwing: error
+            )
+            return
+        }
+
+        do {
+
+            if fileURL != movieURL {
+
+                if FileManager.default.fileExists(
+                    atPath: movieURL.path
+                ) {
+                    try FileManager.default.removeItem(
+                        at: movieURL
+                    )
+                }
+
+                try FileManager.default.moveItem(
+                    at: fileURL,
+                    to: movieURL
+                )
+            }
+
+            moviePath = movieURL.path
+
+            tryFinish()
+
+        } catch {
+
+            finish(
+                throwing: error
+            )
+        }
+    }
+
+    private func tryFinish() {
+
+        guard !finished else {
+            return
+        }
+
+        guard
+            let photoPath = photoPath,
+            let moviePath = moviePath
+        else {
+            return
+        }
+
+        finished = true
+
+        continuation.resume(
+            returning: [
+                "photoPath": photoPath,
+                "videoPath": moviePath
+            ]
+        )
+    }
+
+    private func finish(
+        throwing error: Error
+    ) {
+
+        guard !finished else {
+            return
+        }
+
+        finished = true
+
+        continuation.resume(
+            throwing: error
+        )
+    }
+}
+
 // MARK: - Photo Capture Delegate
 
 private final class PhotoCaptureDelegate:
