@@ -17,18 +17,22 @@ import UIKit
   func didInitializeImplicitFlutterEngine(
     _ engineBridge: FlutterImplicitEngineBridge
   ) {
+    // Flutter 套件註冊
     GeneratedPluginRegistrant.register(
       with: engineBridge.pluginRegistry
     )
 
-    let registrar = engineBridge.pluginRegistry.registrar(
+    // 取得 ProCameraBridge 專用 Registrar
+    guard let registrar = engineBridge.pluginRegistry.registrar(
       forPlugin: "ProCameraBridge"
-    )
-
-    if let registrar = registrar {
-      ProCameraBridge.register(
-        with: registrar
-      )
+    ) else {
+      print("❌ ProCameraBridge registrar 建立失敗")
+      return
     }
+
+    // 註冊自訂 MethodChannel + PlatformView
+    ProCameraBridge.register(
+      with: registrar
+    )
   }
 }
