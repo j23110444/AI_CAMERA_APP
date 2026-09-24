@@ -44,27 +44,64 @@ final class ProCameraManager: NSObject {
   // MARK: - Start Camera
 
   func start(
-    position: AVCaptureDevice.Position = .back,
-    lensType: String = "wide"
-  ) throws {
+  position: AVCaptureDevice.Position = .back,
+  lensType: String = "wide"
+) throws {
 
-    try configureSession(
-      position: position,
-      lensType: lensType
-    )
+  let status = AVCaptureDevice.authorizationStatus(for: .video)
 
-    guard !session.isRunning else {
-      return
-    }
+  switch status {
 
-    sessionQueue.async { [weak self] in
-      guard let self = self else {
+  case .authorized:
+    break
+
+  case .notDetermined:
+    AVCaptureDevice.requestAccess(for: .video) { granted in
+      guard granted else {
         return
       }
 
-      self.session.startRunning()
+        DispatchQueue.main.async {
+        do {
+          try self.start(
+            position: position,
+            lensType: lensType
+          )
+        } catch {
+          print("Camera start failed: \(error)")
+        }
     }
+
+    return
+
+  case .denied, .restricted:
+    throw CameraManagerError.unsupported(
+      "相機權限被拒絕，請到設定 → 隱私權與安全性 → 相機開啟權限"
+    )
+
+  @unknown default:
+    throw CameraManagerError.unsupported(
+      "無法確認相機權限"
+    )
   }
+
+  try configureSession(
+    position: position,
+    lensType: lensType
+  )
+
+  guard !session.isRunning else {
+    return
+  }
+
+  sessionQueue.async { [weak self] in
+    guard let self = self else {
+      return
+    }
+
+    self.session.startRunning()
+  }
+}
 
   // MARK: - Stop Camera
 
@@ -100,15 +137,15 @@ final class ProCameraManager: NSObject {
       )
     }
 
-    try session.beginConfiguration()
+    session.beginConfiguration()
 
     defer {
       session.commitConfiguration()
     }
 
     // Photo quality
-    if session.canSetSessionPreset(.photo) {
-      session.sessionPreset = .photo
+    if session.canSetSessionPreset(.high) {
+      session.sessionPreset = .high
     }
 
     // Remove old input
