@@ -4280,25 +4280,21 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                               ),
                                             )
                                           : _videoPlayerController != null &&
-                                                _videoPlayerController!
-                                                    .value
-                                                    .isInitialized
-                                          ? Center(
-                                              child: AspectRatio(
-                                                aspectRatio:
-                                                    _videoPlayerController!
-                                                        .value
-                                                        .aspectRatio,
-                                                child: WinVideoPlayer(
-                                                  _videoPlayerController!,
+                                                _videoPlayerController!.value.isInitialized
+                                            ? Center(
+                                                child: AspectRatio(
+                                                  aspectRatio:
+                                                      _videoPlayerController!.value.aspectRatio,
+                                                  child: WinVideoPlayer(
+                                                    _videoPlayerController!,
+                                                  ),
+                                                ),
+                                              )
+                                            : const Center(
+                                                child: CircularProgressIndicator(
+                                                  color: Colors.yellowAccent,
                                                 ),
                                               ),
-                                            )
-                                          : const Center(
-                                              child: CircularProgressIndicator(
-                                                color: Colors.yellowAccent,
-                                              ),
-                                            ),
                                     ),
                                   ),
                                   Positioned(
@@ -4418,43 +4414,53 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                   ),
                                 ],
                               )
-                            : SizedBox.expand(
-                                key: _previewKey,
-                                child: ClipRect(
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
+                           : SizedBox.expand(
+                              key: _previewKey,
+                              child: ClipRect(
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    // iOS 使用原生 AVFoundation 預覽
+                                    if (Platform.isIOS)
+                                      const UiKitView(
+                                        viewType: 'ai_camera/pro_preview',
+                                      )
+                                    else
                                       _buildCameraPreview(),
-                                      _buildPreviewEffectOverlay(),
-                                      _buildFocusOverlay(),
-                                      _buildLevelOverlay(),
-                                      _buildProOverlay(),
-                                      CustomPaint(
-                                        painter: CompositionGridPainter(
-                                          _compositionGrid,
-                                        ),
+
+                                    // Flutter UI overlay 保持不變
+                                    _buildPreviewEffectOverlay(),
+                                    _buildFocusOverlay(),
+                                    _buildLevelOverlay(),
+                                    _buildProOverlay(),
+
+                                    CustomPaint(
+                                      painter: CompositionGridPainter(
+                                        _compositionGrid,
                                       ),
-                                      if (_timerCountdown > 0)
-                                        Center(
-                                          child: Text(
-                                            '$_timerCountdown',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 72,
-                                              fontWeight: FontWeight.w300,
-                                              shadows: [
-                                                Shadow(
-                                                  color: Colors.black,
-                                                  blurRadius: 8,
-                                                ),
-                                              ],
-                                            ),
+                                    ),
+
+                                    if (_timerCountdown > 0)
+                                      Center(
+                                        child: Text(
+                                          '$_timerCountdown',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 72,
+                                            fontWeight: FontWeight.w300,
+                                            shadows: [
+                                              Shadow(
+                                                color: Colors.black,
+                                                blurRadius: 8,
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                    ],
-                                  ),
+                                      ),
+                                  ],
                                 ),
                               ),
+                            ),
                       ),
                     ),
                   ],

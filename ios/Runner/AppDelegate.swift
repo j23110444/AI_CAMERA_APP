@@ -2,20 +2,29 @@ import Flutter
 import UIKit
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+@objc class AppDelegate: FlutterAppDelegate,
+  FlutterImplicitEngineDelegate {
+
   override func application(
     _ application: UIApplication,
-    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    didFinishLaunchingWithOptions launchOptions:
+      [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    return super.application(
+      application,
+      didFinishLaunchingWithOptions: launchOptions
+    )
   }
 
-  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    if let registrar = engineBridge.pluginRegistry.registrar(
-      forPlugin: "ProCameraBridge"
-    ) {
-      ProCameraBridge.register(with: registrar)
-    }
+  func didInitializeImplicitFlutterEngine(
+    _ engineBridge: FlutterImplicitEngineBridge
+  ) {
+    GeneratedPluginRegistrant.register(
+      with: engineBridge.pluginRegistry
+    )
+
+    ProCameraBridge.register(
+      with: engineBridge.pluginRegistry
+    )
   }
 }

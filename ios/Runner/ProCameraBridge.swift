@@ -10,15 +10,27 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
   }
 
   static func register(with registrar: FlutterPluginRegistrar) {
-    let instance = ProCameraBridge()
+  let instance = ProCameraBridge()
 
-    let channel = FlutterMethodChannel(
-      name: instance.channelName,
-      binaryMessenger: registrar.messenger()
-    )
+  let channel = FlutterMethodChannel(
+    name: instance.channelName,
+    binaryMessenger: registrar.messenger()
+  )
 
-    registrar.addMethodCallDelegate(instance, channel: channel)
-  }
+  registrar.addMethodCallDelegate(
+    instance,
+    channel: channel
+  )
+
+  let previewFactory = ProCameraPreviewFactory(
+    cameraManager: instance.cameraManager
+  )
+
+  registrar.register(
+    previewFactory,
+    withId: "ai_camera/pro_preview"
+  )
+}
 
   func handle(
     _ call: FlutterMethodCall,
