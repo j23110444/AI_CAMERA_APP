@@ -92,8 +92,8 @@ final class CameraPreviewView: UIView {
       connection.videoOrientation = .portrait
     }
 
-    if connection.isVideoMirroringSupported {
-      connection.isVideoMirrored = false
-    }
+    // 不手動設定 videoMirrored。
+    // 避免 iOS 26 上 AVCaptureConnection setVideoMirrored:
+    // 觸發 SIGABRT。
   }
 }

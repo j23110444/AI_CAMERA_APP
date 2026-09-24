@@ -26,7 +26,6 @@ final class ProCameraManager: NSObject {
     qos: .userInitiated
   )
 
-  private var isConfigured = false
 
   // MARK: - Initialization
 
@@ -214,27 +213,18 @@ final class ProCameraManager: NSObject {
   // MARK: - Video Connection
 
   private func configureConnection() {
-
-    guard let connection = videoOutput.connection(
-      with: .video
-    ) else {
-      return
-    }
-
-    if connection.isVideoOrientationSupported {
-      connection.videoOrientation = .portrait
-    }
-
-    if connection.isVideoMirroringSupported {
-      connection.isVideoMirrored =
-        currentPosition == .front
-    }
-
-    if connection.isVideoStabilizationSupported {
-      connection.preferredVideoStabilizationMode =
-        .auto
-    }
+  guard let connection = videoOutput.connection(with: .video) else {
+    return
   }
+
+  if connection.isVideoOrientationSupported {
+    connection.videoOrientation = .portrait
+  }
+
+  if connection.isVideoStabilizationSupported {
+    connection.preferredVideoStabilizationMode = .auto
+  }
+}
 
   // MARK: - Find Camera
 
@@ -284,8 +274,6 @@ final class ProCameraManager: NSObject {
       )
     }
 
-    let wasRunning = session.isRunning
-
     session.beginConfiguration()
 
     defer {
@@ -323,10 +311,6 @@ final class ProCameraManager: NSObject {
 
     configureConnection()
 
-    if wasRunning {
-      // AVCaptureSession 的 input 切換會在 commitConfiguration
-      // 後繼續使用同一個 session。
-    }
   }
 
   // MARK: - Selected Device
