@@ -5537,9 +5537,10 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                               _baseZoom = _zoomLevel;
                             });
                           },
-                          onHorizontalDragUpdate: (details) {
+                          onHorizontalDragUpdate: (details) async {
                                 final nextZoom = (_zoomLevel - details.primaryDelta! * 0.01)
-                                    .clamp(0.5, 5.0);
+                                    .clamp(0.5, 5.0)
+                                    .toDouble();
 
                                 final shouldUseUltraWide = nextZoom < 1.0;
 
@@ -5547,17 +5548,61 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                                   _zoomLevel = nextZoom;
                                 });
 
+                                // ---------------------------------------------------------------
+                                // 跨過 1.0x 才切換實體鏡頭
+                                // ---------------------------------------------------------------
+
                                 if (shouldUseUltraWide != _isUltraWideActive &&
                                     !_cameraSwitching &&
                                     !_cameraInitializing) {
-                                  unawaited(
-                                    _switchLensForZoomDrag(shouldUseUltraWide),
-                                  );
+                                  setState(() {
+                                    _cameraSwitching = true;
+                                  });
+
+                                  try {
+                                    if (shouldUseUltraWide) {
+                                      await _cameraAdapter.switchToUltraWide();
+                                    } else {
+                                      await _cameraAdapter.switchToStandardWide();
+                                    }
+
+                                    if (!mounted) return;
+
+                                    setState(() {
+                                      _isUltraWideActive = shouldUseUltraWide;
+                                      _focusPoint = null;
+                                      _isFocusVisible = false;
+                                      _isAeAfLocked = false;
+                                    });
+                                  } catch (error) {
+                                    if (mounted) {
+                                      _showAiTip(
+                                        shouldUseUltraWide
+                                            ? '⚠️ 0.5x 廣角無法使用：$error'
+                                            : '⚠️ 1x 廣角無法使用：$error',
+                                      );
+                                    }
+                                  } finally {
+                                    if (mounted) {
+                                      setState(() {
+                                        _cameraSwitching = false;
+                                      });
+                                    }
+                                  }
                                 }
 
+                                // ---------------------------------------------------------------
+                                // UI zoom → Native zoom
+                                // ---------------------------------------------------------------
+
                                 final nativeZoom = shouldUseUltraWide
-                                    ? (nextZoom / 0.5).clamp(1.0, 5.0)
-                                    : nextZoom.clamp(1.0, 5.0);
+                                    ? (nextZoom / 0.5).clamp(1.0, 5.0).toDouble()
+                                    : nextZoom.clamp(1.0, 5.0).toDouble();
+
+                                // 鏡頭切換期間不要把 zoom 套到舊鏡頭
+                                if (_cameraSwitching) {
+                                  return;
+                                }
 
                                 unawaited(
                                   _cameraAdapter.setZoom(nativeZoom),
