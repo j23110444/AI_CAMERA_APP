@@ -328,43 +328,56 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     });
   }
 
-  void _handleFocusTap(Offset localPosition, Size size) {
+ void _handleFocusTap(Offset localPosition, Size size) {
   if (_isAeAfLocked || size.width <= 0 || size.height <= 0) return;
 
-    final uiPoint = Offset(
-      (localPosition.dx / size.width).clamp(0.08, 0.92),
-      (localPosition.dy / size.height).clamp(0.08, 0.92),
-    );
+  final uiPoint = Offset(
+    (localPosition.dx / size.width).clamp(0.08, 0.92),
+    (localPosition.dy / size.height).clamp(0.08, 0.92),
+  );
 
-    setState(() {
-      _focusPoint = uiPoint;
-      _isFocusVisible = true;
-      _exposureGestureArmed = true;
-      _isLongPressActive = false;
-    });
+  setState(() {
+    _focusPoint = uiPoint;
+    _isFocusVisible = true;
+    _exposureGestureArmed = true;
+    _isLongPressActive = false;
+  });
 
-    // AVFoundation 的 focusPointOfInterest 座標
-    final cameraPoint = Offset(
-      uiPoint.dx,
-      1.0 - uiPoint.dy,
-    );
+  // AVFoundation 的 focusPointOfInterest 座標
+  final cameraPoint = Offset(
+    uiPoint.dx,
+    1.0 - uiPoint.dy,
+  );
 
-    unawaited(
-      _cameraAdapter.setFocusPoint(
-        cameraPoint.dx,
-        cameraPoint.dy,
-      ),
-    );
+  unawaited(
+    () async {
+      try {
+        await _cameraAdapter.setFocusPoint(
+          cameraPoint.dx,
+          cameraPoint.dy,
+        );
 
-    _focusTimer?.cancel();
-    _focusTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted && !_isAeAfLocked) {
-        setState(() => _isFocusVisible = false);
+        debugPrint(
+          '🎯 Focus request success: '
+          'UI=(${uiPoint.dx}, ${uiPoint.dy}) '
+          'Camera=(${cameraPoint.dx}, ${cameraPoint.dy})',
+        );
+      } catch (e, stackTrace) {
+        debugPrint('❌ Focus request failed: $e');
+        debugPrint('$stackTrace');
       }
-    });
+    }(),
+  );
 
-    _showAiTip('◎ 已對焦');
-  }
+  _focusTimer?.cancel();
+  _focusTimer = Timer(const Duration(seconds: 2), () {
+    if (mounted && !_isAeAfLocked) {
+      setState(() => _isFocusVisible = false);
+    }
+  });
+
+  _showAiTip('◎ 已對焦');
+}
 
   void _handleLongPressStart(LongPressStartDetails details) {
     final renderObject = _previewKey.currentContext?.findRenderObject();
@@ -1402,60 +1415,103 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     // ============================================================
 
     if (_currentMode == '影片') {
+      // =========================
+      // 停止錄影
+      // =========================
       if (_isRecording) {
-      _recordingTimer?.cancel();
+        _recordingTimer?.cancel();
 
-      final recordedSeconds = _recordingSeconds;
+        final recordedSeconds = _recordingSeconds;
 
+        setState(() {
+          _isRecording = false;
+        });
+
+        try {
+          final videoPath =
+              await _cameraAdapter.stopVideoRecording();
+
+          debugPrint('🎬 原生錄影完成');
+          debugPrint('📁 recorded video: $videoPath');
+
+          final file = File(videoPath);
+          final exists = await file.exists();
+
+          debugPrint('📦 recorded file exists: $exists');
+
+          if (!exists) {
+            throw StateError('錄影完成，但找不到影片檔案');
+          }
+
+          debugPrint(
+            '📏 recorded file size: ${await file.length()} bytes',
+          );
+
+          if (!mounted) return;
+
+          setState(() {
+            _activeUploadedVideo = videoPath;
+            _videoProgress = 0.0;
+            _isVideoPlaying = false;
+            _videoLoadError = null;
+          });
+
+          await _initializeVideoPlayer(videoPath);
+
+          if (!mounted) return;
+
+          _showAiTip(
+            '🎬 錄影完成 ${_formatDuration(recordedSeconds)}',
+          );
+        } catch (e, stackTrace) {
+          debugPrint('❌ 錄影停止/預覽失敗：$e');
+          debugPrint('$stackTrace');
+
+          if (mounted) {
+            _showAiTip('❌ 錄影處理失敗：$e');
+          }
+        }
+
+        return;
+      }
+
+      // =========================
+      // 開始錄影
+      // =========================
       setState(() {
-        _isRecording = false;
+        _isRecording = true;
+        _recordingSeconds = 0;
       });
 
       try {
-        final videoPath =
-            await _cameraAdapter.stopVideoRecording();
+        await _cameraAdapter.startVideoRecording();
 
-        debugPrint('🎬 原生錄影完成');
-        debugPrint('📁 recorded video: $videoPath');
+        _recordingTimer =
+            Timer.periodic(const Duration(seconds: 1), (_) {
+          if (!mounted || !_isRecording) {
+            return;
+          }
 
-        final file = File(videoPath);
-        final exists = await file.exists();
-
-        debugPrint('📦 recorded file exists: $exists');
-
-        if (!exists) {
-          throw StateError('錄影完成，但找不到影片檔案');
-        }
-
-        debugPrint('📏 recorded file size: ${await file.length()} bytes');
-
-        if (!mounted) return;
-
-        setState(() {
-          _activeUploadedVideo = videoPath;
-          _videoProgress = 0.0;
-          _isVideoPlaying = false;
-          _videoLoadError = null;
+          setState(() {
+            _recordingSeconds++;
+          });
         });
 
-        await _initializeVideoPlayer(videoPath);
-
-        if (!mounted) return;
-
-        _showAiTip(
-          '🎬 錄影完成 ${_formatDuration(recordedSeconds)}',
-        );
+        _showAiTip('🔴 開始錄影');
       } catch (e, stackTrace) {
-        debugPrint('❌ 錄影停止/預覽失敗：$e');
+        debugPrint('❌ 開始錄影失敗：$e');
         debugPrint('$stackTrace');
 
         if (mounted) {
-          _showAiTip('❌ 錄影處理失敗：$e');
+          setState(() {
+            _isRecording = false;
+          });
+
+          _showAiTip('❌ 無法開始錄影：$e');
         }
       }
 
       return;
-    }
     }
 
     // ============================================================

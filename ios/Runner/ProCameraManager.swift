@@ -882,43 +882,57 @@ func captureLivePhoto() async throws -> [String: String] {
   // MARK: - Focus Point
 
   func setFocusPoint(
-    x: Double,
-    y: Double
-  ) throws {
-
-    guard let device = selectedDevice else {
-      throw CameraManagerError.cameraNotInitialized
-    }
-
-    guard device.isFocusPointOfInterestSupported else {
-      throw CameraManagerError.unsupported(
-        "裝置不支援指定對焦點"
-      )
-    }
-
-    try device.lockForConfiguration()
-
-    defer {
-      device.unlockForConfiguration()
-    }
-
-    let point = CGPoint(
-      x: min(max(x, 0.0), 1.0),
-      y: min(max(y, 0.0), 1.0)
-    )
-
-    device.focusPointOfInterest = point
-
-      if device.isFocusModeSupported(.autoFocus) {
-        device.focusMode = .autoFocus
-        print("🎯 Auto focus:", point)
-      } else if device.isFocusModeSupported(.continuousAutoFocus) {
-        device.focusMode = .continuousAutoFocus
-        print("🎯 Continuous auto focus:", point)
-      } else {
-        print("⚠️ Device does not support autofocus")
-      }
+  x: Double,
+  y: Double
+) throws {
+  guard let device = selectedDevice else {
+    throw CameraManagerError.cameraNotInitialized
   }
+
+  let point = CGPoint(
+    x: x,
+    y: y
+  )
+
+  print("🎯 Focus request:", x, y)
+  print("🎯 Device:", device.localizedName)
+
+  try device.lockForConfiguration()
+
+  defer {
+    device.unlockForConfiguration()
+  }
+
+  guard device.isFocusPointOfInterestSupported else {
+    print("⚠️ Focus point of interest 不支援")
+    throw CameraManagerError.unsupported(
+      "目前鏡頭不支援指定對焦點"
+    )
+  }
+
+  device.focusPointOfInterest = point
+
+  print(
+    "🎯 Focus point applied:",
+    point
+  )
+
+  if device.isFocusModeSupported(.autoFocus) {
+    device.focusMode = .autoFocus
+
+    print("🎯 Focus mode: autoFocus")
+  } else if device.isFocusModeSupported(.continuousAutoFocus) {
+    device.focusMode = .continuousAutoFocus
+
+    print("🎯 Focus mode: continuousAutoFocus")
+  } else {
+    print("⚠️ Device does not support autofocus")
+
+    throw CameraManagerError.unsupported(
+      "目前鏡頭不支援自動對焦"
+    )
+  }
+}
 
   // MARK: - White Balance
 
@@ -1610,4 +1624,51 @@ enum CameraManagerError: Error {
       return message
     }
   }
+
+private func printAvailableBackCameras() {
+
+  let discovery = AVCaptureDevice.DiscoverySession(
+    deviceTypes: [
+      .builtInWideAngleCamera,
+      .builtInUltraWideCamera,
+      .builtInTelephotoCamera,
+      .builtInTripleCamera,
+      .builtInDualWideCamera
+    ],
+    mediaType: .video,
+    position: .back
+  )
+
+  print("========== BACK CAMERAS ==========")
+
+  for device in discovery.devices {
+    print(
+      """
+      📷 name: \(device.localizedName)
+      📷 type: \(device.deviceType.rawValue)
+      📷 position: \(device.position.rawValue)
+      📷 virtual: \(device.isVirtualDevice)
+      📷 minZoom: \(device.minAvailableVideoZoomFactor)
+      📷 maxZoom: \(device.maxAvailableVideoZoomFactor)
+      """
+    )
+
+    if device.isVirtualDevice {
+      print(
+        "📷 constituents:",
+        device.constituentDevices.map {
+          $0.deviceType.rawValue
+        }
+      )
+
+      print(
+        "📷 switchOver:",
+        device.virtualDeviceSwitchOverVideoZoomFactors
+      )
+    }
+  }
+
+  print("==================================")
+}
+
 }
