@@ -2,13 +2,11 @@ import Flutter
 import UIKit
 
 @main
-@objc class AppDelegate: FlutterAppDelegate,
-  FlutterImplicitEngineDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
 
   override func application(
     _ application: UIApplication,
-    didFinishLaunchingWithOptions launchOptions:
-      [UIApplication.LaunchOptionsKey: Any]?
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     return super.application(
       application,
@@ -23,8 +21,14 @@ import UIKit
       with: engineBridge.pluginRegistry
     )
 
-    ProCameraBridge.register(
-      with: engineBridge.pluginRegistry
+    let registrar = engineBridge.pluginRegistry.registrar(
+      forPlugin: "ProCameraBridge"
     )
+
+    if let registrar = registrar {
+      ProCameraBridge.register(
+        with: registrar
+      )
+    }
   }
 }
