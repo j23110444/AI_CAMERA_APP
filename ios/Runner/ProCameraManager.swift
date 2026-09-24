@@ -909,11 +909,15 @@ func captureLivePhoto() async throws -> [String: String] {
 
     device.focusPointOfInterest = point
 
-    if device.isFocusModeSupported(
-      .autoFocus
-    ) {
-      device.focusMode = .autoFocus
-    }
+      if device.isFocusModeSupported(.autoFocus) {
+        device.focusMode = .autoFocus
+        print("🎯 Auto focus:", point)
+      } else if device.isFocusModeSupported(.continuousAutoFocus) {
+        device.focusMode = .continuousAutoFocus
+        print("🎯 Continuous auto focus:", point)
+      } else {
+        print("⚠️ Device does not support autofocus")
+      }
   }
 
   // MARK: - White Balance

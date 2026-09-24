@@ -36,6 +36,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   bool _captureAnimation = false;
 
   bool _isRecording = false;
+  // ignore: prefer_final_fields
   int _recordingSeconds = 0;
   Timer? _recordingTimer;
   Timer? _captureTimer;
@@ -328,27 +329,40 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   }
 
   void _handleFocusTap(Offset localPosition, Size size) {
-    if (_isAeAfLocked || size.width <= 0 || size.height <= 0) return;
+  if (_isAeAfLocked || size.width <= 0 || size.height <= 0) return;
+
+    final uiPoint = Offset(
+      (localPosition.dx / size.width).clamp(0.08, 0.92),
+      (localPosition.dy / size.height).clamp(0.08, 0.92),
+    );
 
     setState(() {
-      _focusPoint = Offset(
-        (localPosition.dx / size.width).clamp(0.08, 0.92),
-        (localPosition.dy / size.height).clamp(0.08, 0.92),
-      );
+      _focusPoint = uiPoint;
       _isFocusVisible = true;
       _exposureGestureArmed = true;
       _isLongPressActive = false;
     });
-    final point = _focusPoint;
-    if (point != null) {
-      unawaited(_cameraAdapter.setFocusPoint(point.dx, point.dy));
-    }
+
+    // AVFoundation 的 focusPointOfInterest 座標
+    final cameraPoint = Offset(
+      uiPoint.dx,
+      1.0 - uiPoint.dy,
+    );
+
+    unawaited(
+      _cameraAdapter.setFocusPoint(
+        cameraPoint.dx,
+        cameraPoint.dy,
+      ),
+    );
+
     _focusTimer?.cancel();
     _focusTimer = Timer(const Duration(seconds: 2), () {
       if (mounted && !_isAeAfLocked) {
         setState(() => _isFocusVisible = false);
       }
     });
+
     _showAiTip('◎ 已對焦');
   }
 
