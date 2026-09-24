@@ -238,6 +238,44 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     }
   }
 
+  Future<void> _switchLensForZoomDrag(bool toUltraWide) async {
+    if (_cameraSwitching || _cameraInitializing) return;
+
+    try {
+      if (toUltraWide) {
+        await _cameraAdapter.switchToUltraWide();
+
+        if (!mounted) return;
+
+        setState(() {
+          _isUltraWideActive = true;
+          _focusPoint = null;
+          _isFocusVisible = false;
+          _isAeAfLocked = false;
+        });
+      } else {
+        await _cameraAdapter.switchToStandardWide();
+
+        if (!mounted) return;
+
+        setState(() {
+          _isUltraWideActive = false;
+          _focusPoint = null;
+          _isFocusVisible = false;
+          _isAeAfLocked = false;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        _showAiTip(
+          toUltraWide
+              ? '⚠️ 0.5x 廣角無法使用：$error'
+              : '⚠️ 1x 廣角無法使用：$error',
+        );
+      }
+    }
+  }
+
   Future<void> _switchToStandardWide() async {
     if (_cameraSwitching || _cameraInitializing) return;
     setState(() => _cameraSwitching = true);
@@ -5500,20 +5538,31 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                             });
                           },
                           onHorizontalDragUpdate: (details) {
-                            final nextZoom =
-                                (_zoomLevel - details.primaryDelta! * 0.01)
-                                    .clamp(_isUltraWideActive ? 0.5 : 1.0, 5.0);
-                            setState(() {
-                              _zoomLevel = nextZoom;
-                            });
-                            unawaited(
-                              _cameraAdapter.setZoom(
-                                _isUltraWideActive
+                                final nextZoom = (_zoomLevel - details.primaryDelta! * 0.01)
+                                    .clamp(0.5, 5.0);
+
+                                final shouldUseUltraWide = nextZoom < 1.0;
+
+                                setState(() {
+                                  _zoomLevel = nextZoom;
+                                });
+
+                                if (shouldUseUltraWide != _isUltraWideActive &&
+                                    !_cameraSwitching &&
+                                    !_cameraInitializing) {
+                                  unawaited(
+                                    _switchLensForZoomDrag(shouldUseUltraWide),
+                                  );
+                                }
+
+                                final nativeZoom = shouldUseUltraWide
                                     ? (nextZoom / 0.5).clamp(1.0, 5.0)
-                                    : nextZoom.clamp(1.0, 5.0),
-                              ),
-                            );
-                          },
+                                    : nextZoom.clamp(1.0, 5.0);
+
+                                unawaited(
+                                  _cameraAdapter.setZoom(nativeZoom),
+                                );
+                              },
                           onHorizontalDragEnd: (details) {
                             setState(() {
                               _isZoomDragging = false;
