@@ -1020,6 +1020,65 @@ Future<LivePhotoCapture> captureLivePhoto() async {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Native iOS Video Recording
+// ---------------------------------------------------------------------------
+
+Future<void> startVideoRecording() async {
+  if (_useNativeIOSCamera) {
+    await _proChannel.invokeMethod<void>(
+      'startVideoRecording',
+    );
+    return;
+  }
+
+  final controller = _controller;
+
+  if (controller == null ||
+      !controller.value.isInitialized) {
+    throw StateError('相機尚未初始化');
+  }
+
+  if (controller.value.isRecordingVideo) {
+    return;
+  }
+
+  await controller.startVideoRecording();
+}
+
+Future<String> stopVideoRecording() async {
+  if (_useNativeIOSCamera) {
+    final path =
+        await _proChannel.invokeMethod<String>(
+      'stopVideoRecording',
+    );
+
+    if (path == null || path.isEmpty) {
+      throw StateError(
+        '影片錄影完成，但原生相機沒有回傳影片路徑',
+      );
+    }
+
+    return path;
+  }
+
+  final controller = _controller;
+
+  if (controller == null ||
+      !controller.value.isInitialized) {
+    throw StateError('相機尚未初始化');
+  }
+
+  if (!controller.value.isRecordingVideo) {
+    throw StateError('目前沒有正在錄影');
+  }
+
+  final file =
+      await controller.stopVideoRecording();
+
+  return file.path;
+}
+
   // ---------------------------------------------------------------------------
   // Burst
   // ---------------------------------------------------------------------------

@@ -1389,35 +1389,59 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
 
     if (_currentMode == '影片') {
       if (_isRecording) {
-        _recordingTimer?.cancel();
+      _recordingTimer?.cancel();
 
-        setState(() {
-          _isRecording = false;
-        });
-
-        _showAiTip('🎬 錄影完成 ${_formatDuration(_recordingSeconds)}');
-
-        return;
-      }
+      final recordedSeconds = _recordingSeconds;
 
       setState(() {
-        _isRecording = true;
-        _recordingSeconds = 0;
+        _isRecording = false;
       });
 
-      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted || !_isRecording) {
-          return;
+      try {
+        final videoPath =
+            await _cameraAdapter.stopVideoRecording();
+
+        debugPrint('🎬 原生錄影完成');
+        debugPrint('📁 recorded video: $videoPath');
+
+        final file = File(videoPath);
+        final exists = await file.exists();
+
+        debugPrint('📦 recorded file exists: $exists');
+
+        if (!exists) {
+          throw StateError('錄影完成，但找不到影片檔案');
         }
 
-        setState(() {
-          _recordingSeconds++;
-        });
-      });
+        debugPrint('📏 recorded file size: ${await file.length()} bytes');
 
-      _showAiTip('🔴 開始錄影');
+        if (!mounted) return;
+
+        setState(() {
+          _activeUploadedVideo = videoPath;
+          _videoProgress = 0.0;
+          _isVideoPlaying = false;
+          _videoLoadError = null;
+        });
+
+        await _initializeVideoPlayer(videoPath);
+
+        if (!mounted) return;
+
+        _showAiTip(
+          '🎬 錄影完成 ${_formatDuration(recordedSeconds)}',
+        );
+      } catch (e, stackTrace) {
+        debugPrint('❌ 錄影停止/預覽失敗：$e');
+        debugPrint('$stackTrace');
+
+        if (mounted) {
+          _showAiTip('❌ 錄影處理失敗：$e');
+        }
+      }
 
       return;
+    }
     }
 
     // ============================================================
