@@ -46,62 +46,68 @@ final class ProCameraManager: NSObject {
   func start(
   position: AVCaptureDevice.Position = .back,
   lensType: String = "wide"
-) throws {
+  ) throws {
 
-  let status = AVCaptureDevice.authorizationStatus(for: .video)
+    let status = AVCaptureDevice.authorizationStatus(for: .video)
 
-  switch status {
+    switch status {
 
-  case .authorized:
-    break
+    case .authorized:
+      break
 
-  case .notDetermined:
-    AVCaptureDevice.requestAccess(for: .video) { granted in
-      guard granted else {
-        return
-      }
+    case .notDetermined:
+      AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+        guard let self = self else {
+          return
+        }
+
+        guard granted else {
+          print("Camera permission denied")
+          return
+        }
 
         DispatchQueue.main.async {
-        do {
-          try self.start(
-            position: position,
-            lensType: lensType
-          )
-        } catch {
-          print("Camera start failed: \(error)")
+          do {
+            try self.start(
+              position: position,
+              lensType: lensType
+            )
+          } catch {
+            print("Camera start failed: \(error)")
+          }
         }
+      }
+
+      return
+
+    case .denied, .restricted:
+      throw CameraManagerError.unsupported(
+        "相機權限被拒絕，請到設定 → 隱私權與安全性 → 相機開啟權限"
+      )
+
+    @unknown default:
+      throw CameraManagerError.unsupported(
+        "無法確認相機權限"
+      )
     }
 
-    return
-
-  case .denied, .restricted:
-    throw CameraManagerError.unsupported(
-      "相機權限被拒絕，請到設定 → 隱私權與安全性 → 相機開啟權限"
+    try configureSession(
+      position: position,
+      lensType: lensType
     )
 
-  @unknown default:
-    throw CameraManagerError.unsupported(
-      "無法確認相機權限"
-    )
-  }
-
-  try configureSession(
-    position: position,
-    lensType: lensType
-  )
-
-  guard !session.isRunning else {
-    return
-  }
-
-  sessionQueue.async { [weak self] in
-    guard let self = self else {
+    guard !session.isRunning else {
       return
     }
 
-    self.session.startRunning()
+    sessionQueue.async { [weak self] in
+      guard let self = self else {
+        return
+      }
+
+      self.session.startRunning()
+    }
   }
-}
 
   // MARK: - Stop Camera
 
