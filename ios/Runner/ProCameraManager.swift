@@ -1587,6 +1587,15 @@ enum CameraManagerError: Error {
     case .cannotAddVideoOutput:
       return "無法加入影片輸出"
 
+    case .cannotAddMovieOutput:
+      return "無法加入影片錄影輸出"
+
+    case .movieAlreadyRecording:
+      return "影片目前已經在錄影"
+
+    case .movieNotRecording:
+      return "目前沒有正在進行的影片錄影"
+
     case .cameraNotInitialized:
       return "原生相機尚未初始化"
 
