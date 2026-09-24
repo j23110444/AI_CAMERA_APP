@@ -318,7 +318,59 @@ final class ProCameraManager: NSObject {
   private var selectedDevice: AVCaptureDevice? {
     currentInput?.device
   }
+  // MARK: - Capture Photo
 
+  private var photoCaptureDelegate: PhotoCaptureDelegate?
+
+  func capturePhoto() async throws -> String {
+
+    guard session.isRunning else {
+      throw CameraManagerError.cameraNotInitialized
+    }
+
+    guard session.outputs.contains(photoOutput) else {
+      throw CameraManagerError.cannotAddPhotoOutput
+    }
+
+    let settings: AVCapturePhotoSettings
+
+    if photoOutput.availablePhotoCodecTypes.contains(
+      AVVideoCodecType.jpeg
+    ) {
+      settings = AVCapturePhotoSettings(
+        format: [
+          AVVideoCodecKey: AVVideoCodecType.jpeg
+        ]
+      )
+    } else {
+      settings = AVCapturePhotoSettings()
+    }
+
+    if photoOutput.maxPhotoQualityPrioritization == .quality {
+      settings.photoQualityPrioritization = .quality
+    }
+
+    if let connection = photoOutput.connection(with: .video) {
+      if connection.isVideoOrientationSupported {
+        connection.videoOrientation = .portrait
+      }
+    }
+
+    return try await withCheckedThrowingContinuation {
+      (continuation: CheckedContinuation<String, Error>) in
+
+      let delegate = PhotoCaptureDelegate(
+        continuation: continuation
+      )
+
+      photoCaptureDelegate = delegate
+
+      photoOutput.capturePhoto(
+        with: settings,
+        delegate: delegate
+      )
+    }
+  }
   // MARK: - Zoom
 
   func setZoom(_ value: Double) throws {
@@ -844,7 +896,86 @@ final class ProCameraManager: NSObject {
     }
   }
 }
+// MARK: - Photo Capture Delegate
 
+private final class PhotoCaptureDelegate:
+  NSObject,
+  AVCapturePhotoCaptureDelegate {
+
+  private let continuation:
+    CheckedContinuation<String, Error>
+
+  init(
+    continuation: CheckedContinuation<String, Error>
+  ) {
+    self.continuation = continuation
+    super.init()
+  }
+
+  func photoOutput(
+    _ output: AVCapturePhotoOutput,
+    didFinishProcessingPhoto photo: AVCapturePhoto,
+    error: Error?
+  ) {
+
+    if let error = error {
+      continuation.resume(
+        throwing: error
+      )
+      return
+    }
+
+    guard let data = photo.fileDataRepresentation() else {
+      continuation.resume(
+        throwing: CameraManagerError.unsupported(
+          "無法取得照片資料"
+        )
+      )
+      return
+    }
+
+    do {
+      let fileManager = FileManager.default
+
+      let documentsURL =
+        fileManager.urls(
+          for: .documentDirectory,
+          in: .userDomainMask
+        )[0]
+
+      let capturesURL =
+        documentsURL.appendingPathComponent(
+          "captures",
+          isDirectory: true
+        )
+
+      try fileManager.createDirectory(
+        at: capturesURL,
+        withIntermediateDirectories: true
+      )
+
+      let filename =
+        "IMG_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+
+      let fileURL =
+        capturesURL.appendingPathComponent(filename)
+
+      try data.write(
+        to: fileURL,
+        options: .atomic
+      )
+
+      continuation.resume(
+        returning: fileURL.path
+      )
+
+    } catch {
+      continuation.resume(
+        throwing: error
+      )
+    }
+  }
+}
 // MARK: - Errors
 
 enum CameraManagerError: Error {

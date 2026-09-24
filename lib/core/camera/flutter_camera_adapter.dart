@@ -885,33 +885,53 @@ class FlutterCameraAdapter implements CameraPort {
   // 暫時保留原本 Flutter Camera。
   // ---------------------------------------------------------------------------
 
-  @override
-  Future<String> capturePhoto() async {
-    final controller = _controller;
+ @override
+Future<String> capturePhoto() async {
+  // -----------------------------------------------------------------------
+  // iOS 原生 AVFoundation
+  // -----------------------------------------------------------------------
 
-    if (controller == null ||
-        !controller.value.isInitialized) {
-      throw StateError('相機尚未初始化');
+  if (_useNativeIOSCamera) {
+    final path = await _proChannel.invokeMethod<String>(
+      'capturePhoto',
+    );
+
+    if (path == null || path.isEmpty) {
+      throw StateError('拍照失敗：原生相機沒有回傳照片路徑');
     }
 
-    final wasStreaming =
-        controller.value.isStreamingImages;
+    return path;
+  }
 
-    if (wasStreaming) {
-      await controller.stopImageStream();
-    }
+  // -----------------------------------------------------------------------
+  // 非 iOS / Flutter Camera
+  // -----------------------------------------------------------------------
 
-    try {
-      return (await controller.takePicture()).path;
-    } finally {
-      if (wasStreaming &&
-          controller.value.isInitialized) {
-        await controller.startImageStream(
-          _handleCameraImage,
-        );
-      }
+  final controller = _controller;
+
+  if (controller == null ||
+      !controller.value.isInitialized) {
+    throw StateError('相機尚未初始化');
+  }
+
+  final wasStreaming =
+      controller.value.isStreamingImages;
+
+  if (wasStreaming) {
+    await controller.stopImageStream();
+  }
+
+  try {
+    return (await controller.takePicture()).path;
+  } finally {
+    if (wasStreaming &&
+        controller.value.isInitialized) {
+      await controller.startImageStream(
+        _handleCameraImage,
+      );
     }
   }
+}
 
   // ---------------------------------------------------------------------------
   // Live Photo

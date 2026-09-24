@@ -80,7 +80,36 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
       case "discoverCameras":
         result(cameraManager.discoverCameras())
 
-      // MARK: - Zoom
+      case "capturePhoto":
+        Task {
+          do {
+            let path = try await cameraManager.capturePhoto()
+
+            DispatchQueue.main.async {
+              result(path)
+            }
+          } catch let error as CameraManagerError {
+            DispatchQueue.main.async {
+              result(
+                FlutterError(
+                  code: error.code,
+                  message: error.message,
+                  details: nil
+                )
+              )
+            }
+          } catch {
+            DispatchQueue.main.async {
+              result(
+                FlutterError(
+                  code: "CAMERA_ERROR",
+                  message: error.localizedDescription,
+                  details: nil
+                )
+              )
+            }
+          }
+        }
 
       case "setZoom":
         let zoom = (call.arguments as? NSNumber)?.doubleValue ?? 1.0

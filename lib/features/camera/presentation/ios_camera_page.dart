@@ -238,43 +238,6 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     }
   }
 
-  Future<void> _switchLensForZoomDrag(bool toUltraWide) async {
-    if (_cameraSwitching || _cameraInitializing) return;
-
-    try {
-      if (toUltraWide) {
-        await _cameraAdapter.switchToUltraWide();
-
-        if (!mounted) return;
-
-        setState(() {
-          _isUltraWideActive = true;
-          _focusPoint = null;
-          _isFocusVisible = false;
-          _isAeAfLocked = false;
-        });
-      } else {
-        await _cameraAdapter.switchToStandardWide();
-
-        if (!mounted) return;
-
-        setState(() {
-          _isUltraWideActive = false;
-          _focusPoint = null;
-          _isFocusVisible = false;
-          _isAeAfLocked = false;
-        });
-      }
-    } catch (error) {
-      if (mounted) {
-        _showAiTip(
-          toUltraWide
-              ? '⚠️ 0.5x 廣角無法使用：$error'
-              : '⚠️ 1x 廣角無法使用：$error',
-        );
-      }
-    }
-  }
 
   Future<void> _switchToStandardWide() async {
     if (_cameraSwitching || _cameraInitializing) return;
