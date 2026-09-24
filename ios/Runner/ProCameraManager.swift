@@ -328,6 +328,7 @@ final class ProCameraManager: NSObject {
   // MARK: - Capture Photo
 
 private var photoCaptureDelegate: PhotoCaptureDelegate?
+private var movieRecordingDelegate: MovieRecordingDelegate?
 
 func capturePhoto() async throws -> String {
 
@@ -387,6 +388,142 @@ func capturePhoto() async throws -> String {
       with: settings,
       delegate: delegate
     )
+  }
+}
+
+// MARK: - Video Recording
+
+func startVideoRecording() throws {
+
+  guard session.isRunning else {
+    throw CameraManagerError.cameraNotInitialized
+  }
+
+  guard !movieOutput.isRecording else {
+    throw CameraManagerError.movieAlreadyRecording
+  }
+
+  session.beginConfiguration()
+
+  // 不需要移除 photoOutput。
+  // AVCapturePhotoOutput 可以與 MovieFileOutput 同時存在，
+  // 但 MovieFileOutput 存在期間 Live Photo 會被停用。
+
+  guard session.canAddOutput(movieOutput) else {
+    session.commitConfiguration()
+
+    throw CameraManagerError.cannotAddMovieOutput
+  }
+
+  session.addOutput(movieOutput)
+
+  guard let connection =
+    movieOutput.connection(with: .video)
+  else {
+
+    session.removeOutput(movieOutput)
+    session.commitConfiguration()
+
+    throw CameraManagerError.unsupported(
+      "找不到影片輸出連線"
+    )
+  }
+
+  if connection.isVideoOrientationSupported {
+    connection.videoOrientation = .portrait
+  }
+
+  if connection.isVideoStabilizationSupported {
+    connection.preferredVideoStabilizationMode = .auto
+  }
+
+  session.commitConfiguration()
+
+  let fileManager = FileManager.default
+
+  let documentsURL =
+    fileManager.urls(
+      for: .documentDirectory,
+      in: .userDomainMask
+    )[0]
+
+  let capturesURL =
+    documentsURL.appendingPathComponent(
+      "captures",
+      isDirectory: true
+    )
+
+  try fileManager.createDirectory(
+    at: capturesURL,
+    withIntermediateDirectories: true
+  )
+
+  let filename =
+    "VID_\(Int(Date().timeIntervalSince1970 * 1000)).mov"
+
+  let fileURL =
+    capturesURL.appendingPathComponent(filename)
+
+  let delegate = MovieRecordingDelegate(
+    manager: self
+  )
+
+  movieRecordingDelegate = delegate
+
+  movieOutput.startRecording(
+    to: fileURL,
+    recordingDelegate: delegate
+  )
+
+  print("🎥 Start recording:", fileURL.path)
+}
+
+func stopVideoRecording() async throws -> String {
+
+  guard movieOutput.isRecording else {
+    throw CameraManagerError.movieNotRecording
+  }
+
+  guard let delegate = movieRecordingDelegate else {
+    throw CameraManagerError.movieNotRecording
+  }
+
+  return try await withCheckedThrowingContinuation {
+    (
+      continuation:
+        CheckedContinuation<String, Error>
+    ) in
+
+    delegate.continuation = continuation
+
+    movieOutput.stopRecording()
+  }
+}
+
+func finishVideoRecording() {
+
+  sessionQueue.async { [weak self] in
+
+    guard let self = self else {
+      return
+    }
+
+    self.session.beginConfiguration()
+
+    if self.session.outputs.contains(
+      self.movieOutput
+    ) {
+
+      self.session.removeOutput(
+        self.movieOutput
+      )
+    }
+
+    self.session.commitConfiguration()
+
+    self.movieRecordingDelegate = nil
+
+    print("🎥 Movie output removed")
   }
 }
 
@@ -1051,6 +1188,72 @@ func setFlashMode(
   }
 }
 
+// MARK: - Movie Recording Delegate
+
+private final class MovieRecordingDelegate:
+  NSObject,
+  AVCaptureFileOutputRecordingDelegate {
+
+  weak var manager: ProCameraManager?
+
+  var continuation:
+    CheckedContinuation<String, Error>?
+
+  init(
+    manager: ProCameraManager
+  ) {
+    self.manager = manager
+    super.init()
+  }
+
+  func fileOutput(
+    _ output: AVCaptureFileOutput,
+    didStartRecordingTo fileURL: URL,
+    from connections: [AVCaptureConnection]
+  ) {
+
+    print(
+      "🎥 Video recording started:",
+      fileURL.path
+    )
+  }
+
+  func fileOutput(
+    _ output: AVCaptureFileOutput,
+    didFinishRecordingTo outputFileURL: URL,
+    from connections: [AVCaptureConnection],
+    error: Error?
+  ) {
+
+    if let error = error {
+
+      print(
+        "❌ Video recording failed:",
+        error.localizedDescription
+      )
+
+      continuation?.resume(
+        throwing: error
+      )
+
+    } else {
+
+      print(
+        "🎥 Video recording finished:",
+        outputFileURL.path
+      )
+
+      continuation?.resume(
+        returning: outputFileURL.path
+      )
+    }
+
+    continuation = nil
+
+    manager?.finishVideoRecording()
+  }
+}
+
 private final class LivePhotoCaptureDelegate:
     NSObject,
     AVCapturePhotoCaptureDelegate {
@@ -1307,6 +1510,10 @@ enum CameraManagerError: Error {
 
   case cannotAddVideoOutput
 
+  case cannotAddMovieOutput
+  case movieAlreadyRecording
+  case movieNotRecording
+
   case cameraNotInitialized
 
   case unsupported(
@@ -1331,6 +1538,15 @@ enum CameraManagerError: Error {
 
     case .cannotAddVideoOutput:
       return "CANNOT_ADD_VIDEO_OUTPUT"
+
+    case .cannotAddMovieOutput:
+      return "CANNOT_ADD_MOVIE_OUTPUT"
+
+    case .movieAlreadyRecording:
+      return "MOVIE_ALREADY_RECORDING"
+
+    case .movieNotRecording:
+      return "MOVIE_NOT_RECORDING"
 
     case .cameraNotInitialized:
       return "CAMERA_NOT_INITIALIZED"

@@ -152,6 +152,78 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
         }
     }
      
+
+    case "startVideoRecording":
+
+      do {
+
+        try cameraManager.startVideoRecording()
+
+        result(nil)
+
+      } catch let error as CameraManagerError {
+
+        result(
+          FlutterError(
+            code: error.code,
+            message: error.message,
+            details: nil
+          )
+        )
+
+      } catch {
+
+        result(
+          FlutterError(
+            code: "VIDEO_RECORDING_ERROR",
+            message: error.localizedDescription,
+            details: nil
+          )
+        )
+      }
+
+case "stopVideoRecording":
+
+  Task {
+
+    do {
+
+      let path =
+        try await cameraManager.stopVideoRecording()
+
+      DispatchQueue.main.async {
+        result(path)
+      }
+
+    } catch let error as CameraManagerError {
+
+      DispatchQueue.main.async {
+
+        result(
+          FlutterError(
+            code: error.code,
+            message: error.message,
+            details: nil
+          )
+        )
+      }
+
+    } catch {
+
+      DispatchQueue.main.async {
+
+        result(
+          FlutterError(
+            code: "VIDEO_RECORDING_ERROR",
+            message: error.localizedDescription,
+            details: nil
+          )
+        )
+      }
+    }
+  }
+
+
       case "setZoom":
         let zoom = (call.arguments as? NSNumber)?.doubleValue ?? 1.0
 
