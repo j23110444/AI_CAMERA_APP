@@ -5298,7 +5298,7 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                         vertical: 10,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.75),
+                        color: Colors.black.withValues(alpha: 0.75),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
