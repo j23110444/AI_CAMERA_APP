@@ -1512,7 +1512,7 @@ private final class LivePhotoCaptureDelegate:
 
         guard
             let photoPath = photoPath,
-            let moviePath = moviePath,
+            let moviePath = moviePath
         else {
             return
         }
