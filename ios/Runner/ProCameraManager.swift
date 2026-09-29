@@ -1359,65 +1359,6 @@ private final class MovieRecordingDelegate:
   }
 }
 
-
-private func extractLivePhotoAssetIdentifier(
-    from data: Data
-) -> String? {
-
-    guard let source = CGImageSourceCreateWithData(
-        data as CFData,
-        nil
-    ) else {
-        return nil
-    }
-
-    guard let properties =
-        CGImageSourceCopyPropertiesAtIndex(
-            source,
-            0,
-            nil
-        ) as? [CFString: Any]
-    else {
-        return nil
-    }
-
-    guard let makerNote =
-        properties[kCGImagePropertyExifDictionary]
-            as? [CFString: Any]
-    else {
-        return nil
-    }
-
-    return findLivePhotoIdentifier(
-        in: makerNote
-    )
-}
-
-private func findLivePhotoIdentifier(
-    in dictionary: [CFString: Any]
-) -> String? {
-
-    for (_, value) in dictionary {
-
-        if let stringValue = value as? String {
-            if UUID(uuidString: stringValue) != nil {
-                return stringValue
-            }
-        }
-
-        if let nested =
-            value as? [CFString: Any],
-           let result =
-            findLivePhotoIdentifier(
-                in: nested
-            ) {
-            return result
-        }
-    }
-
-    return nil
-}
-
 private final class LivePhotoCaptureDelegate:
     NSObject,
     AVCapturePhotoCaptureDelegate {
@@ -1572,8 +1513,6 @@ private final class LivePhotoCaptureDelegate:
         guard
             let photoPath = photoPath,
             let moviePath = moviePath,
-            let assetIdentifier = assetIdentifier,
-            !assetIdentifier.isEmpty
         else {
             return
         }
@@ -1584,7 +1523,7 @@ private final class LivePhotoCaptureDelegate:
             returning: [
                 "photoPath": photoPath,
                 "videoPath": moviePath,
-                "assetIdentifier": assetIdentifier
+                "assetIdentifier": assetIdentifier ?? ""
             ]
         )
     }
