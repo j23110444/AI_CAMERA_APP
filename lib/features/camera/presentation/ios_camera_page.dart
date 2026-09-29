@@ -966,15 +966,27 @@ Future<void> _capturePhoto() async {
         liveCapture?.photoPath ?? await _cameraAdapter.capturePhoto();
 
     // ====================================================
-    // 照片套用濾鏡 / 調色盤 / 曝光 / 夜景
+    // 照片特效處理
     // ====================================================
+    debugPrint('📸 [1] 原始照片：$originalPath');
+
+    if (!await File(originalPath).exists()) {
+      debugPrint('❌ [1] 原始照片不存在');
+      throw Exception('原始照片不存在');
+    }
+
     final path = await _applyPhotoEffects(originalPath);
-    debugPrint('📸 LivePhoto 原始照片: $originalPath');
-    debugPrint('🎨 效果後照片: $path');
-    debugPrint('🎨 Filter: $_filterMode');
-    debugPrint('🎨 Palette: $_selectedPalette');
-    debugPrint('🎨 Exposure: $_exposureValue');
-    debugPrint('🌙 Night: $_nightMode');
+
+    debugPrint('📸 [2] 特效照片：$path');
+
+    if (!await File(path).exists()) {
+      debugPrint('❌ [2] 特效照片不存在');
+      throw Exception('特效照片不存在');
+    }
+
+    debugPrint(
+      '📸 [3] 特效照片大小：${await File(path).length()} bytes',
+    );
     String? processedVideoPath;
 
     // ====================================================
@@ -3816,24 +3828,9 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                 }
 
                 // ====================================================
-                // 右滑 → 保存
+                // 右滑 → 兩階段保存
                 // ====================================================
                 if (dx > 0) {
-                  // ------------------------------------------------
-                  // 永久相簿：已經保存，不重複保存
-                  // ------------------------------------------------
-                  if (showSavedImages) {
-                    setStateDialog(() {
-                      horizontalDragOffset = 0.0;
-                      verticalAnimationOffset = 0.0;
-                      horizontalAction = 0;
-                    });
-
-                    _showAiTip('📌 這張照片已經在永久相簿中');
-
-                    return;
-                  }
-
                   isAnimating = true;
 
                   // ------------------------------------------------
@@ -3845,21 +3842,29 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                     verticalAnimationOffset = 0.0;
                   });
 
-                  await Future.delayed(const Duration(milliseconds: 180));
+                  await Future.delayed(
+                    const Duration(milliseconds: 180),
+                  );
 
                   if (!mounted) {
                     isAnimating = false;
                     return;
                   }
 
-                  // ------------------------------------------------
-                  // ② 保存到 Apple 照片
-                  // ------------------------------------------------
-                  final savedSuccessfully =
-                      await _saveImageToApplePhotos(itemPath);
-
-                  if (savedSuccessfully) {
+                  // ==================================================
+                  // 第一階段
+                  // AI 精選預覽 → APP 內相簿
+                  // ==================================================
+                  if (!showSavedImages) {
+                    // ------------------------------------------------
+                    // ② 加入 APP 內相簿
+                    // ------------------------------------------------
                     setState(() {
+                      if (!_savedImages.contains(itemPath)) {
+                        _savedImages.add(itemPath);
+                      }
+
+                      // 從 AI 精選預覽移除
                       if (currentIndex >= 0 &&
                           currentIndex < _capturedImages.length) {
                         _capturedImages.removeAt(currentIndex);
@@ -3867,54 +3872,88 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                     });
 
                     await _persistImageLists();
+
+                    if (!mounted) {
+                      isAnimating = false;
+                      return;
+                    }
+
+                    debugPrint(
+                      '✅ RIGHT SWIPE → APP ALBUM: $itemPath',
+                    );
+
+                    _showAiTip('📌 已加入 APP 相簿');
                   }
 
-                  if (!mounted) {
-                    isAnimating = false;
-                    return;
+                  // ==================================================
+                  // 第二階段
+                  // APP 內相簿 → Apple 照片
+                  // ==================================================
+                  else {
+                    // ------------------------------------------------
+                    // ② 正式保存到 Apple 照片
+                    // ------------------------------------------------
+                    final savedSuccessfully =
+                        await _saveImageToApplePhotos(itemPath);
+
+                    if (!mounted) {
+                      isAnimating = false;
+                      return;
+                    }
+
+                    // ------------------------------------------------
+                    // 保存失敗 → 彈回
+                    // ------------------------------------------------
+                    if (!savedSuccessfully) {
+                      setStateDialog(() {
+                        horizontalDragOffset = 0.0;
+                        verticalAnimationOffset = 0.0;
+                        horizontalAction = 0;
+                      });
+
+                      isAnimating = false;
+
+                      _showAiTip('⚠️ 照片保存失敗');
+
+                      return;
+                    }
+
+                    // ------------------------------------------------
+                    // 保存成功
+                    //
+                    // 注意：
+                    // 不從 _savedImages 移除
+                    // ------------------------------------------------
+                    await _persistImageLists();
+
+                    debugPrint(
+                      '✅ RIGHT SWIPE → APPLE PHOTOS: $itemPath',
+                    );
+
+                    _showAiTip('✅ 已保存到 Apple 照片');
                   }
 
-                  // ------------------------------------------------
-                  // ③ 保存失敗 → 彈回
-                  // ------------------------------------------------
-                  if (!savedSuccessfully) {
-                    setStateDialog(() {
-                      horizontalDragOffset = 0.0;
-                      verticalAnimationOffset = 0.0;
-                      horizontalAction = 0;
-                    });
-
-                    isAnimating = false;
-
-                    _showAiTip('⚠️ 照片保存失敗');
-
-                    return;
-                  }
-
-                  // ------------------------------------------------
-                  // ④ 保存成功
-                  // ------------------------------------------------
-                  debugPrint('✅ RIGHT SWIPE SAVE SUCCESS');
-
-                  // ------------------------------------------------
-                  // ⑤ 最後一張 → 關閉 Gallery
-                  // ------------------------------------------------
+                  // ==================================================
+                  // ③ 已經沒有照片
+                  // ==================================================
                   if (galleryImages.isEmpty) {
-                    if (!dialogContext.mounted) return;
+                    if (!dialogContext.mounted) {
+                      isAnimating = false;
+                      return;
+                    }
+
                     if (Navigator.canPop(dialogContext)) {
                       Navigator.pop(dialogContext);
                     }
 
                     isAnimating = false;
 
-                    _showAiTip('✅ 已保存最後一張 AI 精選照片');
-
                     return;
                   }
 
-                  // ------------------------------------------------
-                  // ⑥ 修正 index
-                  // ------------------------------------------------
+                  // ==================================================
+                  // ④ 修正 index
+                  // ==================================================
                   if (currentIndex >= galleryImages.length) {
                     currentIndex = galleryImages.length - 1;
                   }
@@ -3925,9 +3964,11 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
 
                   final nextIndex = currentIndex;
 
-                  // ------------------------------------------------
-                  // ⑦ 清除左右位移
-                  // ------------------------------------------------
+                  // ==================================================
+                  // ⑤ 清除左右動畫
+                  //
+                  // 新照片先放到螢幕下方
+                  // ==================================================
                   setStateDialog(() {
                     horizontalDragOffset = 0.0;
                     horizontalAction = 0;
@@ -3935,40 +3976,47 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                     verticalAnimationOffset = screenHeight * 0.60;
                   });
 
-                  // ------------------------------------------------
-                  // ⑧ PageView 跳到新的照片
-                  // ------------------------------------------------
+                  // ==================================================
+                  // ⑥ PageView 跳到下一張
+                  // ==================================================
                   if (pageController.hasClients) {
                     pageController.jumpToPage(nextIndex);
                   }
 
-                  // ------------------------------------------------
-                  // ⑨ 等待 PageView 更新
-                  // ------------------------------------------------
-                  await Future.delayed(const Duration(milliseconds: 20));
+                  // ==================================================
+                  // ⑦ 等待 PageView 更新
+                  // ==================================================
+                  await Future.delayed(
+                    const Duration(milliseconds: 20),
+                  );
 
                   if (!mounted) {
                     isAnimating = false;
                     return;
                   }
 
-                  // ------------------------------------------------
-                  // ⑩ 下一張由下方進場
-                  // ------------------------------------------------
+                  // ==================================================
+                  // ⑧ 新照片由下往上進場
+                  // ==================================================
                   setStateDialog(() {
                     verticalAnimationOffset = 0.0;
                   });
 
-                  await Future.delayed(const Duration(milliseconds: 220));
+                  // ==================================================
+                  // ⑨ 等待進場動畫完成
+                  // ==================================================
+                  await Future.delayed(
+                    const Duration(milliseconds: 220),
+                  );
 
                   if (!mounted) {
                     isAnimating = false;
                     return;
                   }
 
-                  // ------------------------------------------------
-                  // ⑪ 完成
-                  // ------------------------------------------------
+                  // ==================================================
+                  // ⑩ 最終清除動畫狀態
+                  // ==================================================
                   setStateDialog(() {
                     horizontalDragOffset = 0.0;
                     verticalAnimationOffset = 0.0;
@@ -3976,16 +4024,9 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                   });
 
                   isAnimating = false;
-                  if (!dialogContext.mounted) return;
-                 ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(
-                      content: Text('✅ 已保存到 Apple 照片'),
-                      duration: Duration(milliseconds: 800),
-                    ),
-                  );
 
                   return;
-                }
+                }             
               }
               // ======================================================
               // 垂直手勢
