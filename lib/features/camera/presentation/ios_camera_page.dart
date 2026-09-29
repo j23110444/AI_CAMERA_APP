@@ -27,6 +27,9 @@ class IOSCameraPage extends StatefulWidget {
 }
 
 class _IOSCameraPageState extends State<IOSCameraPage> {
+
+  String _effectDebugMessage = '';
+
   final PreferenceModel _preferenceModel = const PreferenceModel();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _previewKey = GlobalKey();
@@ -835,6 +838,7 @@ String _quoteFFmpegArgument(String value) {
 }
 
 Future<String> _applyPhotoEffects(String sourcePath) async {
+  _showEffectDebug('④-1 進入特效處理');
   final sourceFile = File(sourcePath);
 
   if (!await sourceFile.exists()) {
@@ -847,6 +851,11 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
   if (original == null) {
     throw Exception('無法解析照片');
   }
+_showEffectDebug(
+  '④-2 照片解析成功\n'
+  'Filter：$_filterMode\n'
+  'Palette：$_selectedPalette\n'
+  'Exposure：$_exposureValue',);
 
   img.Image processed = img.Image.from(original);
 
@@ -888,7 +897,7 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
       filterOpacity,
     );
   }
-
+_showEffectDebug('④-3 Filter 套用完成');
   // ====================================================
   // 2. 調色盤
   // ====================================================
@@ -905,7 +914,7 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
       paletteOpacity,
     );
   }
-
+_showEffectDebug('④-4 Palette 套用完成');
   // ====================================================
   // 3. 曝光
   // 與預覽的白/黑 Overlay 邏輯一致
@@ -951,19 +960,38 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
       processed,
       quality: 95,
     ),
+    flush:true,
   );
-
+_showEffectDebug(
+  '④-5 特效照片已輸出\n'
+  'processed_*.jpg',
+);
   return outputPath;
 }
+void _showEffectDebug(String message) {
+  if (!mounted) return;
 
+  setState(() {
+    _effectDebugMessage = message;
+  });
+
+  debugPrint('🎨 EFFECT DEBUG: $message');
+}
 Future<void> _capturePhoto() async {
   try {
+    _showEffectDebug('① 開始拍照');
+
     final liveCapture = _livePhotoEnabled
         ? await _cameraAdapter.captureLivePhoto()
         : null;
 
+    _showEffectDebug('② 已取得拍照結果');
+
     final originalPath =
-        liveCapture?.photoPath ?? await _cameraAdapter.capturePhoto();
+        liveCapture?.photoPath ??
+        await _cameraAdapter.capturePhoto();
+
+    _showEffectDebug('③ 原始照片取得');
 
     // ====================================================
     // 照片特效處理
@@ -1010,10 +1038,10 @@ Future<void> _capturePhoto() async {
     }
 
     if (!mounted) return;
-
+    _showEffectDebug('⑥ 準備加入 AI 精選預覽');
     setState(() {
       _capturedImages.add(path);
-
+    _showEffectDebug('⑦ 已加入特效照片');
       if (liveCapture != null &&
             processedVideoPath != null) {
           _livePhotoVideos[path] = processedVideoPath;
@@ -5254,8 +5282,38 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                     ),
                   ],
                 ),
-              ),
+              ),          
             ),
+
+
+                if (_effectDebugMessage.isNotEmpty)
+                Positioned(
+                  top: 100,
+                  left: 20,
+                  right: 20,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.75),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        _effectDebugMessage,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ),
+
 
             // 2. iOS 風格頂部控制列與下拉控制面板
             Positioned(
