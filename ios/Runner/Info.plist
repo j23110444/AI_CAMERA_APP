@@ -28,6 +28,8 @@
 	<string>需要使用相機以提供即時預覽與拍照功能。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>需要使用麥克風以支援錄影功能。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+    <string>AI 智慧相機需要將拍攝的照片與原況照片保存到您的照片圖庫。</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

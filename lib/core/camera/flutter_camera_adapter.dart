@@ -962,16 +962,14 @@ Future<String> capturePhoto() async {
           result['videoPath']?.toString();
 
       final assetIdentifier =
-          result['assetIdentifier']?.toString();
+    result['assetIdentifier']?.toString() ?? '';
 
       if (photoPath == null ||
           photoPath.isEmpty ||
           videoPath == null ||
-          videoPath.isEmpty ||
-          assetIdentifier == null ||
-          assetIdentifier.isEmpty) {
+          videoPath.isEmpty) {
         throw StateError(
-          'Live Photo 拍攝失敗：照片、影片或 Asset Identifier 無效',
+          'Live Photo 拍攝失敗：照片或影片無效',
         );
       }
 
