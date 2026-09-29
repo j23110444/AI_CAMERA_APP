@@ -969,7 +969,12 @@ Future<void> _capturePhoto() async {
     // 照片套用濾鏡 / 調色盤 / 曝光 / 夜景
     // ====================================================
     final path = await _applyPhotoEffects(originalPath);
-
+    debugPrint('📸 LivePhoto 原始照片: $originalPath');
+    debugPrint('🎨 效果後照片: $path');
+    debugPrint('🎨 Filter: $_filterMode');
+    debugPrint('🎨 Palette: $_selectedPalette');
+    debugPrint('🎨 Exposure: $_exposureValue');
+    debugPrint('🌙 Night: $_nightMode');
     String? processedVideoPath;
 
     // ====================================================
