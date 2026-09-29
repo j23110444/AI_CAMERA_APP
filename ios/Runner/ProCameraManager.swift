@@ -1,5 +1,7 @@
 import AVFoundation
+import ImageIO
 import UIKit
+import Photos
 
 final class ProCameraManager: NSObject {
 
@@ -341,7 +343,6 @@ func capturePhoto() async throws -> String {
   }
 
   let settings: AVCapturePhotoSettings
-
   if photoOutput.availablePhotoCodecTypes.contains(
     AVVideoCodecType.jpeg
   ) {
@@ -531,6 +532,93 @@ func finishVideoRecording() {
 
 private var livePhotoCaptureDelegate: LivePhotoCaptureDelegate?
 
+
+func saveLivePhoto(
+    photoPath: String,
+    videoPath: String
+) async throws -> Bool {
+
+    let photoURL = URL(fileURLWithPath: photoPath)
+    let videoURL = URL(fileURLWithPath: videoPath)
+
+    guard FileManager.default.fileExists(atPath: photoURL.path) else {
+        throw CameraManagerError.unsupported(
+            "找不到 Live Photo 照片檔案"
+        )
+    }
+
+    guard FileManager.default.fileExists(atPath: videoURL.path) else {
+        throw CameraManagerError.unsupported(
+            "找不到 Live Photo 影片檔案"
+        )
+    }
+
+    let authorizationStatus =
+        PHPhotoLibrary.authorizationStatus(
+            for: .addOnly
+        )
+
+    if authorizationStatus == .notDetermined {
+        let granted =
+            await PHPhotoLibrary.requestAuthorization(
+                for: .addOnly
+            )
+
+        guard granted == .authorized ||
+              granted == .limited else {
+            throw CameraManagerError.unsupported(
+                "沒有照片加入權限"
+            )
+        }
+    } else {
+        guard authorizationStatus == .authorized ||
+              authorizationStatus == .limited else {
+            throw CameraManagerError.unsupported(
+                "沒有照片加入權限"
+            )
+        }
+    }
+
+    return try await withCheckedThrowingContinuation {
+        (
+            continuation:
+                CheckedContinuation<Bool, Error>
+        ) in
+
+        PHPhotoLibrary.shared().performChanges({
+
+            let creationRequest =
+                PHAssetCreationRequest()
+
+            creationRequest.addResource(
+                with: .photo,
+                fileURL: photoURL,
+                options: nil
+            )
+
+            creationRequest.addResource(
+                with: .pairedVideo,
+                fileURL: videoURL,
+                options: nil
+            )
+
+        }) { success, error in
+
+            if let error = error {
+                continuation.resume(
+                    throwing: error
+                )
+                return
+            }
+
+            continuation.resume(
+                returning: success
+            )
+        }
+    }
+}
+
+
 func captureLivePhoto() async throws -> [String: String] {
 
     guard session.isRunning else {
@@ -586,7 +674,6 @@ func captureLivePhoto() async throws -> [String: String] {
         )
 
     let settings: AVCapturePhotoSettings
-
     if photoOutput.availablePhotoCodecTypes.contains(
         AVVideoCodecType.jpeg
     ) {
@@ -1272,6 +1359,65 @@ private final class MovieRecordingDelegate:
   }
 }
 
+
+private func extractLivePhotoAssetIdentifier(
+    from data: Data
+) -> String? {
+
+    guard let source = CGImageSourceCreateWithData(
+        data as CFData,
+        nil
+    ) else {
+        return nil
+    }
+
+    guard let properties =
+        CGImageSourceCopyPropertiesAtIndex(
+            source,
+            0,
+            nil
+        ) as? [CFString: Any]
+    else {
+        return nil
+    }
+
+    guard let makerNote =
+        properties[kCGImagePropertyExifDictionary]
+            as? [CFString: Any]
+    else {
+        return nil
+    }
+
+    return findLivePhotoIdentifier(
+        in: makerNote
+    )
+}
+
+private func findLivePhotoIdentifier(
+    in dictionary: [CFString: Any]
+) -> String? {
+
+    for (_, value) in dictionary {
+
+        if let stringValue = value as? String {
+            if UUID(uuidString: stringValue) != nil {
+                return stringValue
+            }
+        }
+
+        if let nested =
+            value as? [CFString: Any],
+           let result =
+            findLivePhotoIdentifier(
+                in: nested
+            ) {
+            return result
+        }
+    }
+
+    return nil
+}
+
 private final class LivePhotoCaptureDelegate:
     NSObject,
     AVCapturePhotoCaptureDelegate {
@@ -1285,6 +1431,8 @@ private final class LivePhotoCaptureDelegate:
     private var photoPath: String?
     private var moviePath: String?
 
+    private var assetIdentifier: String?
+
     private var finished = false
 
     init(
@@ -1293,7 +1441,6 @@ private final class LivePhotoCaptureDelegate:
         photoURL: URL,
         movieURL: URL
     ) {
-
         self.continuation = continuation
         self.photoURL = photoURL
         self.movieURL = movieURL
@@ -1301,16 +1448,17 @@ private final class LivePhotoCaptureDelegate:
         super.init()
     }
 
+    // -----------------------------------------------------------------------
+    // Photo
+    // -----------------------------------------------------------------------
+
     func photoOutput(
         _ output: AVCapturePhotoOutput,
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
-
         if let error = error {
-            finish(
-                throwing: error
-            )
+            finish(throwing: error)
             return
         }
 
@@ -1325,8 +1473,36 @@ private final class LivePhotoCaptureDelegate:
             return
         }
 
-        do {
+        // ---------------------------------------------------------------
+        // Live Photo Asset Identifier
+        //
+        // AVCapturePhotoOutput 會自動產生 Live Photo identifier，
+        // 並寫入照片的 EXIF MakerNote。
+        // 這裡只讀取 Apple 已產生的 identifier，
+        // 不自行猜測 metadata。
+        // ---------------------------------------------------------------
 
+        if let exif =
+            photo.metadata[
+                kCGImagePropertyExifDictionary as String
+            ] as? [String: Any],
+
+           let makerNote =
+            exif[
+                kCGImagePropertyMakerNoteDictionary as String
+            ] as? [String: Any] {
+
+            for (_, value) in makerNote {
+                if let value = value as? String,
+                   !value.isEmpty {
+
+                    assetIdentifier = value
+                    break
+                }
+            }
+        }
+
+        do {
             try data.write(
                 to: photoURL,
                 options: .atomic
@@ -1337,12 +1513,13 @@ private final class LivePhotoCaptureDelegate:
             tryFinish()
 
         } catch {
-
-            finish(
-                throwing: error
-            )
+            finish(throwing: error)
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Live Photo Movie
+    // -----------------------------------------------------------------------
 
     func photoOutput(
         _ output: AVCapturePhotoOutput,
@@ -1352,16 +1529,12 @@ private final class LivePhotoCaptureDelegate:
         resolvedSettings: AVCaptureResolvedPhotoSettings,
         error: Error?
     ) {
-
         if let error = error {
-            finish(
-                throwing: error
-            )
+            finish(throwing: error)
             return
         }
 
         do {
-
             if fileURL != movieURL {
 
                 if FileManager.default.fileExists(
@@ -1383,22 +1556,24 @@ private final class LivePhotoCaptureDelegate:
             tryFinish()
 
         } catch {
-
-            finish(
-                throwing: error
-            )
+            finish(throwing: error)
         }
     }
 
-    private func tryFinish() {
+    // -----------------------------------------------------------------------
+    // Finish
+    // -----------------------------------------------------------------------
 
+    private func tryFinish() {
         guard !finished else {
             return
         }
 
         guard
             let photoPath = photoPath,
-            let moviePath = moviePath
+            let moviePath = moviePath,
+            let assetIdentifier = assetIdentifier,
+            !assetIdentifier.isEmpty
         else {
             return
         }
@@ -1408,7 +1583,8 @@ private final class LivePhotoCaptureDelegate:
         continuation.resume(
             returning: [
                 "photoPath": photoPath,
-                "videoPath": moviePath
+                "videoPath": moviePath,
+                "assetIdentifier": assetIdentifier
             ]
         )
     }
@@ -1416,7 +1592,6 @@ private final class LivePhotoCaptureDelegate:
     private func finish(
         throwing error: Error
     ) {
-
         guard !finished else {
             return
         }
@@ -1624,51 +1799,5 @@ enum CameraManagerError: Error {
       return message
     }
   }
-
-private func printAvailableBackCameras() {
-
-  let discovery = AVCaptureDevice.DiscoverySession(
-    deviceTypes: [
-      .builtInWideAngleCamera,
-      .builtInUltraWideCamera,
-      .builtInTelephotoCamera,
-      .builtInTripleCamera,
-      .builtInDualWideCamera
-    ],
-    mediaType: .video,
-    position: .back
-  )
-
-  print("========== BACK CAMERAS ==========")
-
-  for device in discovery.devices {
-    print(
-      """
-      📷 name: \(device.localizedName)
-      📷 type: \(device.deviceType.rawValue)
-      📷 position: \(device.position.rawValue)
-      📷 virtual: \(device.isVirtualDevice)
-      📷 minZoom: \(device.minAvailableVideoZoomFactor)
-      📷 maxZoom: \(device.maxAvailableVideoZoomFactor)
-      """
-    )
-
-    if device.isVirtualDevice {
-      print(
-        "📷 constituents:",
-        device.constituentDevices.map {
-          $0.deviceType.rawValue
-        }
-      )
-
-      print(
-        "📷 switchOver:",
-        device.virtualDeviceSwitchOverVideoZoomFactors
-      )
-    }
-  }
-
-  print("==================================")
-}
 
 }

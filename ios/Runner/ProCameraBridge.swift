@@ -151,7 +151,47 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
             }
         }
     }
-     
+     case "saveLivePhoto":
+
+    guard
+        let args = call.arguments as? [String: Any],
+        let photoPath = args["photoPath"] as? String,
+        let videoPath = args["videoPath"] as? String
+    else {
+        result(
+            FlutterError(
+                code: "INVALID_ARGUMENT",
+                message: "Live Photo 路徑無效",
+                details: nil
+            )
+        )
+        return
+    }
+
+    Task {
+        do {
+            let success =
+                try await cameraManager.saveLivePhoto(
+                    photoPath: photoPath,
+                    videoPath: videoPath
+                )
+
+            DispatchQueue.main.async {
+                result(success)
+            }
+
+        } catch {
+            DispatchQueue.main.async {
+                result(
+                    FlutterError(
+                        code: "SAVE_LIVE_PHOTO_FAILED",
+                        message: error.localizedDescription,
+                        details: nil
+                    )
+                )
+            }
+        }
+    }
 
     case "startVideoRecording":
 

@@ -4,8 +4,13 @@ import 'camera_metrics.dart';
 class LivePhotoCapture {
   final String photoPath;
   final String videoPath;
+  final String assetIdentifier;
 
-  const LivePhotoCapture({required this.photoPath, required this.videoPath});
+  const LivePhotoCapture({
+    required this.photoPath,
+    required this.videoPath,
+    required this.assetIdentifier,
+  });
 }
 
 abstract class CameraPort {
@@ -47,6 +52,8 @@ abstract class CameraPort {
 
   /// 真正拍攝一張照片。
   Future<String> capturePhoto();
+
+  /// 拍攝真正的 Live Photo。
   Future<LivePhotoCapture> captureLivePhoto();
 
   /// 傳統連拍功能保留。

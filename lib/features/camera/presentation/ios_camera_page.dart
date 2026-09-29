@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
-
+import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:camera/camera.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
@@ -30,7 +30,8 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   final PreferenceModel _preferenceModel = const PreferenceModel();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _previewKey = GlobalKey();
-
+  final Map<String, String> _livePhotoAssetIdentifiers = {};
+  VideoPlayerController? _recordedVideoPreviewController;
   String _currentMode = '拍照'; // 影片、拍照、物景
   bool _isCapturing = false;
   bool _captureAnimation = false;
@@ -47,7 +48,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   double _videoProgress = 0.0; // 0.0 ~ 1.0
   WinVideoPlayerController? _videoPlayerController;
   String? _videoLoadError;
-
+  final List<String> _recordedVideos = [];
   // AI 影片分析：下一次分析的起始位置
   Duration? _nextVideoCapturePosition;
 
@@ -163,6 +164,137 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
 
   final List<String> _modes = ['影片', '拍照', '物景'];
 
+  //影片
+  Future<void> _showRecordedVideoPreview(
+  String videoPath,
+) async {
+  final file = File(videoPath);
+
+  if (!await file.exists()) {
+    if (mounted) {
+      _showAiTip('⚠️ 找不到錄製的影片檔案');
+    }
+    return;
+  }
+
+  final controller =
+      VideoPlayerController.file(file);
+
+  _recordedVideoPreviewController = controller;
+
+  try {
+    await controller.initialize();
+
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+
+    await controller.setLooping(true);
+
+    await controller.play();
+
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.black,
+          insetPadding:
+              const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 40,
+          ),
+          child: Stack(
+            children: [
+              Center(
+                child: AspectRatio(
+                  aspectRatio:
+                      controller.value.aspectRatio > 0
+                          ? controller.value.aspectRatio
+                          : 9 / 16,
+                  child: VideoPlayer(
+                    controller,
+                  ),
+                ),
+              ),
+
+              Positioned(
+                top: 8,
+                right: 8,
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.of(
+                      dialogContext,
+                    ).pop();
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration:
+                        const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
+
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 12,
+                child: VideoProgressIndicator(
+                  controller,
+                  allowScrubbing: true,
+                  colors:
+                      const VideoProgressColors(
+                    playedColor:
+                        Colors.yellowAccent,
+                    bufferedColor:
+                        Colors.white38,
+                    backgroundColor:
+                        Colors.white24,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  } catch (e, stackTrace) {
+    debugPrint(
+      '❌ Recorded video preview failed: $e',
+    );
+    debugPrint('$stackTrace');
+
+    if (mounted) {
+      _showAiTip(
+        '⚠️ 影片無法播放：$e',
+      );
+    }
+  } finally {
+    if (_recordedVideoPreviewController ==
+        controller) {
+      _recordedVideoPreviewController = null;
+    }
+
+    await controller.dispose();
+  }
+}
+  
   @override
   void initState() {
     super.initState();
@@ -311,6 +443,8 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     _videoPlayerController?.dispose();
     _cameraAdapter.dispose();
     _promptController.dispose();
+    _recordedVideoPreviewController?.dispose();
+    _recordedVideoPreviewController = null;
     super.dispose();
   }
 
@@ -475,33 +609,427 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     });
   }
 
-  Future<void> _capturePhoto() async {
-    try {
-      final liveCapture = _livePhotoEnabled
-          ? await _cameraAdapter.captureLivePhoto()
-          : null;
-      final path =
-          liveCapture?.photoPath ?? await _cameraAdapter.capturePhoto();
-      if (!mounted) return;
-      setState(() {
-        _capturedImages.add(path);
-        if (liveCapture != null) {
-          _livePhotoVideos[path] = liveCapture.videoPath;
-        }
-        _isCapturing = false;
-        _captureAnimation = true;
-      });
-      Timer(const Duration(milliseconds: 550), () {
-        if (mounted) setState(() => _captureAnimation = false);
-      });
-      await _persistImageLists();
-      _showAiTip('📷 拍攝完成');
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _isCapturing = false);
-      _showAiTip('⚠️ 拍攝失敗：$error');
+img.Image _applyColorOverlay(
+  img.Image source,
+  Color color,
+  double opacity,
+) {
+  final result = img.Image.from(source);
+
+  final blend = opacity.clamp(0.0, 1.0);
+
+  final r = color.r.toInt();
+  final g = color.g.toInt();
+  final b = color.b.toInt();
+
+  for (final pixel in result) {
+    final originalR = pixel.r.toInt();
+    final originalG = pixel.g.toInt();
+    final originalB = pixel.b.toInt();
+
+    pixel
+      ..r = (originalR * (1.0 - blend) + r * blend)
+          .round()
+          .clamp(0, 255)
+      ..g = (originalG * (1.0 - blend) + g * blend)
+          .round()
+          .clamp(0, 255)
+      ..b = (originalB * (1.0 - blend) + b * blend)
+          .round()
+          .clamp(0, 255);
+  }
+
+  return result;
+}
+
+Future<String> _applyLivePhotoVideoEffects(
+  String sourcePath,
+) async {
+  final sourceFile = File(sourcePath);
+
+  if (!await sourceFile.exists()) {
+    throw Exception('找不到 Live Photo 影片');
+  }
+
+  final directory = sourceFile.parent;
+
+  final outputPath =
+      '${directory.path}${Platform.pathSeparator}'
+      'processed_live_${DateTime.now().microsecondsSinceEpoch}.mov';
+
+  final filters = <String>[];
+
+  // ====================================================
+  // 濾鏡
+  // ====================================================
+
+  switch (_filterMode) {
+    case '鮮明':
+      filters.add(
+        'colorchannelmixer='
+        'rr=1.06:gg=1.06:bb=1.02',
+      );
+      break;
+
+    case '溫暖':
+      filters.add(
+        'colorchannelmixer='
+        'rr=1.08:gg=1.03:bb=0.96',
+      );
+      break;
+
+    case '冷色':
+      filters.add(
+        'colorchannelmixer='
+        'rr=0.96:gg=1.02:bb=1.08',
+      );
+      break;
+
+    case '復古':
+      filters.add(
+        'colorchannelmixer='
+        'rr=1.05:gg=0.97:bb=0.90',
+      );
+      break;
+  }
+
+  // ====================================================
+  // 調色盤
+  // ====================================================
+
+  if (_selectedPalette != '原味') {
+    final paletteColor = _paletteColor(_selectedPalette);
+
+    final paletteOpacity =
+        (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12))
+            .clamp(0.04, 0.21);
+
+    final r = paletteColor.r / 255.0;
+    final g = paletteColor.g / 255.0;
+    final b = paletteColor.b / 255.0;
+
+    final inv = 1.0 - paletteOpacity;
+
+    filters.add(
+      'colorchannelmixer='
+      'rr=${inv + r * paletteOpacity}:'
+      'gg=${inv + g * paletteOpacity}:'
+      'bb=${inv + b * paletteOpacity}',
+    );
+  }
+
+  // ====================================================
+  // 曝光
+  // ====================================================
+
+  final exposure = _exposureValue;
+
+  if (exposure != 0) {
+    final exposureOpacity =
+        (exposure.abs() * 0.12).clamp(0.0, 0.24);
+
+    final multiplier = exposure >= 0
+        ? 1.0 + exposureOpacity
+        : 1.0 - exposureOpacity;
+
+    filters.add(
+      'eq=brightness=${exposure >= 0 ? exposureOpacity : -exposureOpacity}:'
+      'contrast=1.0',
+    );
+
+    if (multiplier != 1.0) {
+      filters.add(
+        'colorchannelmixer='
+        'rr=$multiplier:'
+        'gg=$multiplier:'
+        'bb=$multiplier',
+      );
     }
   }
+
+  // ====================================================
+  // 夜景
+  // ====================================================
+
+  if (_nightMode) {
+    filters.add(
+      'colorchannelmixer='
+      'rr=0.98:gg=0.98:bb=1.04',
+    );
+  }
+
+  // ====================================================
+  // 如果沒有任何效果
+  // 就直接複製影片，不重新編碼
+  // ====================================================
+
+  if (filters.isEmpty) {
+    await sourceFile.copy(outputPath);
+    return outputPath;
+  }
+
+  final filterComplex = filters.join(',');
+
+  final command = [
+    '-y',
+    '-i',
+    _quoteFFmpegPath(sourcePath),
+    '-vf',
+    _quoteFFmpegArgument(filterComplex),
+    '-c:v',
+    'h264_videotoolbox',
+    '-b:v',
+    '8M',
+    '-c:a',
+    'copy',
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a?',
+    '-movflags',
+    'use_metadata_tags',
+    _quoteFFmpegPath(outputPath),
+  ].join(' ');
+
+  debugPrint('🎬 Live Photo FFmpeg command: $command');
+
+  final session = await FFmpegKit.execute(command);
+
+  final returnCode = await session.getReturnCode();
+
+  if (!ReturnCode.isSuccess(returnCode)) {
+    final logs = await session.getAllLogsAsString();
+
+    debugPrint(
+      '❌ Live Photo 影片處理失敗\n'
+      'ReturnCode: $returnCode\n'
+      'Logs:\n$logs',
+    );
+
+    throw Exception(
+      'Live Photo 影片效果處理失敗',
+    );
+  }
+
+  final outputFile = File(outputPath);
+
+  if (!await outputFile.exists()) {
+    throw Exception(
+      'Live Photo 影片處理完成，但找不到輸出檔案',
+    );
+  }
+
+  debugPrint(
+    '✅ Live Photo 影片效果完成：$outputPath',
+  );
+
+  return outputPath;
+}
+
+String _quoteFFmpegPath(String path) {
+  return '"${path.replaceAll('"', r'\"')}"';
+}
+
+String _quoteFFmpegArgument(String value) {
+  return '"${value.replaceAll('"', r'\"')}"';
+}
+
+Future<String> _applyPhotoEffects(String sourcePath) async {
+  final sourceFile = File(sourcePath);
+
+  if (!await sourceFile.exists()) {
+    throw Exception('找不到照片檔案');
+  }
+
+  final bytes = await sourceFile.readAsBytes();
+  final original = img.decodeImage(bytes);
+
+  if (original == null) {
+    throw Exception('無法解析照片');
+  }
+
+  img.Image processed = img.Image.from(original);
+
+  // ====================================================
+  // 1. 濾鏡
+  // ====================================================
+  Color? filterColor;
+  double filterOpacity = 0.0;
+
+  switch (_filterMode) {
+    case '鮮明':
+      filterColor = Colors.orange;
+      filterOpacity = 0.06;
+      break;
+
+    case '溫暖':
+      filterColor = Colors.amber;
+      filterOpacity = 0.08;
+      break;
+
+    case '冷色':
+      filterColor = Colors.blue;
+      filterOpacity = 0.08;
+      break;
+
+    case '復古':
+      filterColor = Colors.brown;
+      filterOpacity = 0.10;
+      break;
+
+    default:
+      break;
+  }
+
+  if (filterColor != null && filterOpacity > 0) {
+    processed = _applyColorOverlay(
+      processed,
+      filterColor,
+      filterOpacity,
+    );
+  }
+
+  // ====================================================
+  // 2. 調色盤
+  // ====================================================
+  if (_selectedPalette != '原味') {
+    final paletteColor = _paletteColor(_selectedPalette);
+
+    final paletteOpacity =
+        (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12))
+            .clamp(0.04, 0.21);
+
+    processed = _applyColorOverlay(
+      processed,
+      paletteColor,
+      paletteOpacity,
+    );
+  }
+
+  // ====================================================
+  // 3. 曝光
+  // 與預覽的白/黑 Overlay 邏輯一致
+  // ====================================================
+  final exposureOpacity =
+      (_exposureValue.abs() * 0.12).clamp(0.0, 0.24);
+
+  if (exposureOpacity > 0) {
+    final exposureColor = _exposureValue >= 0
+        ? Colors.white
+        : Colors.black;
+
+    processed = _applyColorOverlay(
+      processed,
+      exposureColor,
+      exposureOpacity,
+    );
+  }
+
+  // ====================================================
+  // 4. 夜景
+  // 與預覽的 Indigo Overlay 邏輯一致
+  // ====================================================
+  if (_nightMode) {
+    processed = _applyColorOverlay(
+      processed,
+      Colors.indigo,
+      0.08,
+    );
+  }
+
+  // ====================================================
+  // 5. 輸出處理後照片
+  // ====================================================
+  final directory = sourceFile.parent;
+
+  final outputPath =
+      '${directory.path}${Platform.pathSeparator}'
+      'processed_${DateTime.now().microsecondsSinceEpoch}.jpg';
+
+  await File(outputPath).writeAsBytes(
+    img.encodeJpg(
+      processed,
+      quality: 95,
+    ),
+  );
+
+  return outputPath;
+}
+
+Future<void> _capturePhoto() async {
+  try {
+    final liveCapture = _livePhotoEnabled
+        ? await _cameraAdapter.captureLivePhoto()
+        : null;
+
+    final originalPath =
+        liveCapture?.photoPath ?? await _cameraAdapter.capturePhoto();
+
+    // ====================================================
+    // 照片套用濾鏡 / 調色盤 / 曝光 / 夜景
+    // ====================================================
+    final path = await _applyPhotoEffects(originalPath);
+
+    String? processedVideoPath;
+
+    // ====================================================
+    // 原況照片：影片也套用相同效果
+    // ====================================================
+    if (liveCapture != null) {
+      try {
+        processedVideoPath =
+            await _applyLivePhotoVideoEffects(
+          liveCapture.videoPath,
+        );
+      } catch (error, stackTrace) {
+        debugPrint(
+          '⚠️ Live Photo 影片效果處理失敗：$error',
+        );
+        debugPrint('$stackTrace');
+
+        // 影片處理失敗時，先保留原始 Live Photo 影片
+        processedVideoPath = liveCapture.videoPath;
+      }
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _capturedImages.add(path);
+
+      if (liveCapture != null &&
+            processedVideoPath != null) {
+          _livePhotoVideos[path] = processedVideoPath;
+
+          _livePhotoAssetIdentifiers[path] =
+              liveCapture.assetIdentifier;
+        }
+
+      _isCapturing = false;
+      _captureAnimation = true;
+    });
+
+    Timer(const Duration(milliseconds: 550), () {
+      if (mounted) {
+        setState(() => _captureAnimation = false);
+      }
+    });
+
+    await _persistImageLists();
+
+    _showAiTip('📷 拍攝完成');
+  } catch (error, stackTrace) {
+    debugPrint('❌ 拍照失敗：$error');
+    debugPrint('$stackTrace');
+
+    if (!mounted) return;
+
+    setState(() => _isCapturing = false);
+
+    _showAiTip('⚠️ 拍攝失敗：$error');
+  }
+}
+
 
   void _changeModeByVelocity(double? primaryVelocity) {
     // 錄影、上傳影片、濾鏡、調色盤開啟時
@@ -620,20 +1148,25 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
         if (!mounted || _videoPlayerController != controller) return;
 
         final value = controller.value;
+
         if (!value.isInitialized) return;
 
         final durationMs = value.duration.inMilliseconds;
-        if (durationMs > 0) {
-          final progress = value.position.inMilliseconds / durationMs;
-          setState(() {
-            _videoProgress = progress.clamp(0.0, 1.0);
-            _isVideoPlaying = value.isPlaying;
-          });
-        } else {
-          setState(() {
-            _isVideoPlaying = value.isPlaying;
-          });
+
+        final progress = durationMs > 0
+            ? (value.position.inMilliseconds / durationMs).clamp(0.0, 1.0)
+            : 0.0;
+
+        // 避免影片播放時每一幀都觸發不必要的 setState
+        if ((_videoProgress - progress).abs() < 0.01 &&
+            _isVideoPlaying == value.isPlaying) {
+          return;
         }
+
+        setState(() {
+          _videoProgress = progress;
+          _isVideoPlaying = value.isPlaying;
+        });
       });
 
       await controller.play();
@@ -849,41 +1382,142 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     await prefs.setStringList('saved_images', List<String>.from(_savedImages));
   }
 
-  Future<bool> _saveCandidateToGallery(String sourcePath) async {
-    final file = File(sourcePath);
+Future<bool> _saveImageToApplePhotos(String sourcePath) async {
+  final file = File(sourcePath);
 
+  try {
     if (!await file.exists()) {
-      debugPrint('❌ Candidate image does not exist: $sourcePath');
+      debugPrint(
+        'Image does not exist: $sourcePath',
+      );
       return false;
     }
 
-    if (!mounted) {
-      return false;
-    }
+    // ------------------------------------------------------------
+    // Live Photo
+    // ------------------------------------------------------------
 
-    setState(() {
-      _capturedImages.remove(sourcePath);
+    final livePhotoVideo =
+        _livePhotoVideos[sourcePath];
 
-      if (!_savedImages.contains(sourcePath)) {
-        _savedImages.add(sourcePath);
+    if (livePhotoVideo != null) {
+      final videoFile =
+          File(livePhotoVideo);
+
+      if (!await videoFile.exists()) {
+        debugPrint(
+          '❌ Live Photo video does not exist: '
+          '$livePhotoVideo',
+        );
+        return false;
       }
-    });
 
-    await _persistImageLists();
-    try {
-      await Gal.putImage(sourcePath);
-    } catch (error, stackTrace) {
-      debugPrint('Failed to save image to system gallery: $error');
-      debugPrint('$stackTrace');
+      final success =
+          await _cameraAdapter.saveLivePhoto(
+        photoPath: sourcePath,
+        videoPath: livePhotoVideo,
+      );
+
+      if (!success) {
+        debugPrint(
+          '❌ Live Photo 保存失敗',
+        );
+
+        if (mounted) {
+          _showAiTip(
+            '⚠️ Live Photo 保存失敗',
+          );
+        }
+
+        return false;
+      }
+
+      debugPrint(
+        '✅ Live Photo saved to Apple Photos',
+      );
+
       if (mounted) {
-        _showAiTip('⚠️ 已保存到 App，相簿權限或系統相簿保存失敗');
+        _showAiTip(
+          '✅ Live Photo 已保存到 Apple 照片',
+        );
       }
+
+      return true;
     }
 
-    debugPrint('✅ Candidate moved to saved images: $sourcePath');
+    // ------------------------------------------------------------
+    // 一般照片
+    // ------------------------------------------------------------
+
+    await Gal.putImage(sourcePath);
+
+    debugPrint(
+      '✅ Image saved to Apple Photos: $sourcePath',
+    );
+
+    if (mounted) {
+      _showAiTip(
+        '✅ 已保存到 Apple 照片',
+      );
+    }
 
     return true;
+  } catch (error, stackTrace) {
+    debugPrint(
+      '❌ Failed to save to Apple Photos: $error',
+    );
+    debugPrint('$stackTrace');
+
+    if (mounted) {
+      _showAiTip(
+        '⚠️ 保存到 Apple 照片失敗',
+      );
+    }
+
+    return false;
   }
+}
+
+
+Future<bool> _saveCandidateToGallery(String sourcePath) async {
+  final file = File(sourcePath);
+
+  try {
+    if (!await file.exists()) {
+      debugPrint('Candidate image does not exist: $sourcePath');
+      return false;
+    }
+  } catch (error, stackTrace) {
+    debugPrint('Failed to check image: $error');
+    debugPrint('$stackTrace');
+    return false;
+  }
+
+  if (!mounted) return false;
+
+  setState(() {
+    _capturedImages.remove(sourcePath);
+
+    if (!_savedImages.contains(sourcePath)) {
+      _savedImages.add(sourcePath);
+    }
+  });
+
+  try {
+    await _persistImageLists();
+    debugPrint('Image saved to App gallery: $sourcePath');
+    return true;
+  } catch (error, stackTrace) {
+    debugPrint('Failed to persist image lists: $error');
+    debugPrint('$stackTrace');
+
+    if (mounted) {
+      _showAiTip('⚠️ 圖片保存失敗');
+    }
+
+    return false;
+  }
+}
 
   Future<void> _showLivePhotoPreview(String photoPath) async {
     final videoPath = _livePhotoVideos[photoPath];
@@ -1107,12 +1741,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                       _livePhotoVideos[editedPath] = liveVideo;
                     }
                     await _persistImageLists();
-                    try {
-                      await Gal.putImage(editedPath);
-                    } catch (error, stackTrace) {
-                      debugPrint('Edited image gallery save failed: $error');
-                      debugPrint('$stackTrace');
-                    }
+                    
                     if (mounted) setState(() {});
                     if (dialogContext.mounted) Navigator.pop(dialogContext);
                     _showAiTip('✅ 照片調整已保存');
@@ -1449,14 +2078,15 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
 
           if (!mounted) return;
 
-          setState(() {
-            _activeUploadedVideo = videoPath;
-            _videoProgress = 0.0;
-            _isVideoPlaying = false;
-            _videoLoadError = null;
-          });
+          if (!mounted) return;
 
-          await _initializeVideoPlayer(videoPath);
+            setState(() {
+              _recordedVideos.insert(0, videoPath);
+            });
+
+            _showAiTip(
+              '🎬 錄影完成 ${_formatDuration(recordedSeconds)}',
+            );
 
           if (!mounted) return;
 
@@ -3836,29 +4466,67 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
                   ),
 
                   // ======================================================
-                  // 關閉按鈕
+                  // Apple 照片保存 + 關閉按鈕
                   // ======================================================
                   Positioned(
                     top: 40,
                     right: 20,
-                    child: Material(
-                      color: Colors.black.withValues(alpha: 0.5),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // ==================================================
+                        // App 內相簿 → Apple 照片
+                        // 只有永久相簿才顯示
+                        // ==================================================
+                        if (showSavedImages)
+                          Material(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            shape: const CircleBorder(),
+                            child: IconButton(
+                              tooltip: '保存到 Apple 照片',
+                              icon: const Icon(
+                                Icons.download_rounded,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                              onPressed: () async {
+                                if (isAnimating) return;
 
-                      shape: const CircleBorder(),
+                                if (currentIndex < 0 ||
+                                    currentIndex >= galleryImages.length) {
+                                  return;
+                                }
 
-                      child: IconButton(
-                        icon: const Icon(
-                          Icons.close,
-                          color: Colors.white,
-                          size: 32,
+                                final imagePath = galleryImages[currentIndex];
+
+                                await _saveImageToApplePhotos(imagePath);
+                              },
+                            ),
+                          ),
+
+                        if (showSavedImages) const SizedBox(width: 8),
+
+                        // ==================================================
+                        // 關閉
+                        // ==================================================
+                        Material(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          shape: const CircleBorder(),
+                          child: IconButton(
+                            tooltip: '關閉',
+                            icon: const Icon(
+                              Icons.close,
+                              color: Colors.white,
+                              size: 32,
+                            ),
+                            onPressed: () {
+                              if (!isAnimating) {
+                                Navigator.pop(dialogContext);
+                              }
+                            },
+                          ),
                         ),
-
-                        onPressed: () {
-                          if (!isAnimating) {
-                            Navigator.pop(dialogContext);
-                          }
-                        },
-                      ),
+                      ],
                     ),
                   ),
                   Positioned(
@@ -5196,246 +5864,445 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
 
             // 4. 右側直列式預覽清單
             Positioned(
-              right: 16,
-              top: 160,
-              bottom: 140,
-              width: 70,
-              child: _capturedImages.isEmpty
-                  ? const SizedBox.shrink()
-                  : Column(
-                      children: [
-                        IconButton(
-                          onPressed: _clearAllImages,
-                          icon: const Icon(
-                            Icons.delete_sweep,
-                            color: Colors.redAccent,
-                            size: 28,
-                          ),
-                          tooltip: '全部清除',
-                        ),
-                        const SizedBox(height: 4),
-                        Expanded(
-                          child: ListView.builder(
-                            itemCount: _capturedImages.length,
-                            itemBuilder: (context, index) {
-                              final itemPath = _capturedImages[index];
-                              final imageFile = File(itemPath);
-                              final bool isRealImage = imageFile.existsSync();
-
-                              return Dismissible(
-                                key: Key('$itemPath-$index'),
-                                direction: DismissDirection.horizontal,
-
-                                background: Container(
-                                  alignment: Alignment.centerLeft,
-                                  padding: const EdgeInsets.only(left: 12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                    Icons.save,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                ),
-
-                                secondaryBackground: Container(
-                                  alignment: Alignment.centerRight,
-                                  padding: const EdgeInsets.only(right: 12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                    Icons.delete,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                ),
-
-                                confirmDismiss: (direction) async {
-                                  // 左滑 → 刪除
-                                  if (direction ==
-                                      DismissDirection.endToStart) {
-                                    return true;
-                                  }
-
-                                  // 右滑 → 保存
-                                  if (direction ==
-                                      DismissDirection.startToEnd) {
-                                    if (!isRealImage) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                            const SnackBar(
-                                              content: Text('⚠️ 此項目不是可保存的圖片檔案'),
-                                              duration: Duration(seconds: 1),
-                                            ),
-                                          );
-
-                                      return false;
-                                    }
-
-                                    debugPrint(
-                                      '========================================',
-                                    );
-                                    debugPrint('➡️ RIGHT SWIPE SAVE');
-                                    debugPrint('➡️ SOURCE: $itemPath');
-                                    debugPrint(
-                                      '➡️ EXISTS: ${imageFile.existsSync()}',
-                                    );
-
-                                    final savedSuccessfully =
-                                        await _saveCandidateToGallery(itemPath);
-
-                                    debugPrint(
-                                      '➡️ SAVE RESULT: $savedSuccessfully',
-                                    );
-                                    debugPrint(
-                                      '========================================',
-                                    );
-
-                                    if (!savedSuccessfully) {
-                                      if (!context.mounted) return false;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                            const SnackBar(
-                                              content: Text('⚠️ 照片保存失敗'),
-                                              duration: Duration(seconds: 1),
-                                            ),
-                                          );
-
-                                      return false;
-                                    }
-
-                                    if (!context.mounted) return false;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('✅ AI 精選照片已保存'),
-                                        duration: Duration(seconds: 1),
-                                      ),
-                                    );
-
-                                    // _saveCandidateToGallery() 已經從 _capturedImages 移除
-                                    // 所以這裡不能再讓 Dismissible 自己移除
-                                    return false;
-                                  }
-
-                                  return false;
-                                },
-
-                                onDismissed: (direction) async {
-                                  if (direction ==
-                                      DismissDirection.endToStart) {
-                                    if (!mounted) return;
-
-                                    final file = File(itemPath);
-
-                                    setState(() {
-                                      if (index < _capturedImages.length) {
-                                        _capturedImages.removeAt(index);
-                                      }
-                                    });
-
-                                    // 刪除 captures 裡的實體檔案
-                                    try {
-                                      if (await file.exists()) {
-                                        await file.delete();
-                                        debugPrint(
-                                          '🗑️ Deleted captured file: ${file.path}',
-                                        );
-                                      }
-                                    } catch (e) {
-                                      debugPrint(
-                                        '❌ Failed to delete captured file: $e',
-                                      );
-                                    }
-
-                                    // 更新 SharedPreferences
-                                    await _persistImageLists();
-
-                                    debugPrint(
-                                      '🗑️ Deleted captured image: $itemPath',
-                                    );
-                                  }
-                                },
-
-                                child: GestureDetector(
-                                  onTap: () {
-                                    if (_livePhotoVideos.containsKey(
-                                      itemPath,
-                                    )) {
-                                      _showLivePhotoPreview(itemPath);
-                                    } else {
-                                      _showEnlargedGallery(index);
-                                    }
-                                  },
-                                  onLongPress: () =>
-                                      _showEnlargedGallery(index),
-
-                                  child: Container(
-                                    margin: const EdgeInsets.only(bottom: 10),
-                                    height: 70,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[800],
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(
-                                        color: Colors.yellowAccent,
-                                        width: 2,
-                                      ),
-                                    ),
-
-                                    child: isRealImage
-                                        ? ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                            child: Image.file(
-                                              imageFile,
-                                              width: double.infinity,
-                                              height: double.infinity,
-                                              fit: BoxFit.cover,
-                                              errorBuilder:
-                                                  (context, error, stackTrace) {
-                                                    return const Icon(
-                                                      Icons.broken_image,
-                                                      color: Colors.redAccent,
-                                                      size: 26,
-                                                    );
-                                                  },
-                                            ),
-                                          )
-                                        : Center(
-                                            child: Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                const Icon(
-                                                  Icons.image,
-                                                  size: 20,
-                                                  color: Colors.yellowAccent,
-                                                ),
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  '#${index + 1}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+  right: 16,
+  top: 160,
+  bottom: 140,
+  width: 70,
+  child: _capturedImages.isEmpty && _recordedVideos.isEmpty
+      ? const SizedBox.shrink()
+      : Column(
+          children: [
+            IconButton(
+              onPressed: _clearAllImages,
+              icon: const Icon(
+                Icons.delete_sweep,
+                color: Colors.redAccent,
+                size: 28,
+              ),
+              tooltip: '全部清除',
             ),
+            const SizedBox(height: 4),
+
+            Expanded(
+              child: ListView.builder(
+                itemCount:
+                    _capturedImages.length + _recordedVideos.length,
+
+                itemBuilder: (context, index) {
+                  // =========================================================
+                  // 照片
+                  // =========================================================
+                  if (index < _capturedImages.length) {
+                    final itemPath = _capturedImages[index];
+                    final imageFile = File(itemPath);
+                    final bool isRealImage =
+                        imageFile.existsSync();
+
+                    return Dismissible(
+                      key: Key(
+                        'photo-$itemPath-$index',
+                      ),
+                      direction:
+                          DismissDirection.horizontal,
+
+                      // -----------------------------------------------------
+                      // 右滑 → 保存
+                      // -----------------------------------------------------
+                      background: Container(
+                        alignment: Alignment.centerLeft,
+                        padding:
+                            const EdgeInsets.only(left: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          borderRadius:
+                              BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.save,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
+
+                      // -----------------------------------------------------
+                      // 左滑 → 刪除
+                      // -----------------------------------------------------
+                      secondaryBackground: Container(
+                        alignment: Alignment.centerRight,
+                        padding:
+                            const EdgeInsets.only(right: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius:
+                              BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.delete,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
+
+                      confirmDismiss:
+                          (direction) async {
+                        // =========================================
+                        // 左滑 → 刪除
+                        // =========================================
+                        if (direction ==
+                            DismissDirection.endToStart) {
+                          return true;
+                        }
+
+                        // =========================================
+                        // 右滑 → 保存
+                        // =========================================
+                        if (direction ==
+                            DismissDirection.startToEnd) {
+                          if (!isRealImage) {
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  '⚠️ 此項目不是可保存的圖片檔案',
+                                ),
+                                duration:
+                                    Duration(seconds: 1),
+                              ),
+                            );
+
+                            return false;
+                          }
+
+                          debugPrint(
+                            '========================================',
+                          );
+                          debugPrint(
+                            '➡️ RIGHT SWIPE SAVE',
+                          );
+                          debugPrint(
+                            '➡️ SOURCE: $itemPath',
+                          );
+                          debugPrint(
+                            '➡️ EXISTS: ${imageFile.existsSync()}',
+                          );
+
+                          final savedSuccessfully =
+                              await _saveCandidateToGallery(
+                            itemPath,
+                          );
+
+                          debugPrint(
+                            '➡️ SAVE RESULT: $savedSuccessfully',
+                          );
+                          debugPrint(
+                            '========================================',
+                          );
+
+                          if (!savedSuccessfully) {
+                            if (!context.mounted) {
+                              return false;
+                            }
+
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  '⚠️ 照片保存失敗',
+                                ),
+                                duration:
+                                    Duration(seconds: 1),
+                              ),
+                            );
+
+                            return false;
+                          }
+
+                          if (!context.mounted) {
+                            return false;
+                          }
+
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                '✅ AI 精選照片已保存',
+                              ),
+                              duration:
+                                  Duration(seconds: 1),
+                            ),
+                          );
+
+                          // _saveCandidateToGallery()
+                          // 已經從 _capturedImages 移除
+                          return false;
+                        }
+
+                        return false;
+                      },
+
+                      onDismissed:
+                          (direction) async {
+                        if (direction !=
+                            DismissDirection.endToStart) {
+                          return;
+                        }
+
+                        if (!mounted) return;
+
+                        final file = File(itemPath);
+
+                        setState(() {
+                          if (index <
+                              _capturedImages.length) {
+                            _capturedImages.removeAt(index);
+                          }
+                        });
+
+                        // 刪除 captures 實體檔案
+                        try {
+                          if (await file.exists()) {
+                            await file.delete();
+
+                            debugPrint(
+                              '🗑️ Deleted captured file: '
+                              '${file.path}',
+                            );
+                          }
+                        } catch (e) {
+                          debugPrint(
+                            '❌ Failed to delete captured file: $e',
+                          );
+                        }
+
+                        // 更新 SharedPreferences
+                        await _persistImageLists();
+
+                        debugPrint(
+                          '🗑️ Deleted captured image: $itemPath',
+                        );
+                      },
+
+                      // -----------------------------------------------------
+                      // 照片縮圖
+                      // -----------------------------------------------------
+                      child: GestureDetector(
+                        onTap: () {
+                          if (_livePhotoVideos
+                              .containsKey(itemPath)) {
+                            _showLivePhotoPreview(
+                              itemPath,
+                            );
+                          } else {
+                            _showEnlargedGallery(
+                              index,
+                            );
+                          }
+                        },
+
+                        onLongPress: () {
+                          _showEnlargedGallery(
+                            index,
+                          );
+                        },
+
+                        child: Container(
+                          margin:
+                              const EdgeInsets.only(
+                            bottom: 10,
+                          ),
+                          height: 70,
+
+                          decoration: BoxDecoration(
+                            color: Colors.grey[800],
+                            borderRadius:
+                                BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.yellowAccent,
+                              width: 2,
+                            ),
+                          ),
+
+                          child: isRealImage
+                              ? ClipRRect(
+                                  borderRadius:
+                                      BorderRadius.circular(
+                                    8,
+                                  ),
+                                  child: Image.file(
+                                    imageFile,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                    fit: BoxFit.cover,
+                                    errorBuilder:
+                                        (
+                                      context,
+                                      error,
+                                      stackTrace,
+                                    ) {
+                                      return const Icon(
+                                        Icons.broken_image,
+                                        color:
+                                            Colors.redAccent,
+                                        size: 26,
+                                      );
+                                    },
+                                  ),
+                                )
+                              : Center(
+                                  child: Column(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment
+                                            .center,
+                                    children: [
+                                      const Icon(
+                                        Icons.image,
+                                        size: 20,
+                                        color:
+                                            Colors.yellowAccent,
+                                      ),
+                                      const SizedBox(
+                                        height: 2,
+                                      ),
+                                      Text(
+                                        '#${index + 1}',
+                                        style:
+                                            const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight:
+                                              FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  // =========================================================
+                  // 影片
+                  // =========================================================
+
+                  final videoIndex =
+                      index - _capturedImages.length;
+
+                  final videoPath =
+                      _recordedVideos[videoIndex];
+
+                  final videoFile =
+                      File(videoPath);
+
+                  return GestureDetector(
+                    key: Key(
+                      'video-$videoPath-$videoIndex',
+                    ),
+
+                    // -------------------------------------------------------
+                    // 長按影片 → 放大預覽
+                    // -------------------------------------------------------
+                    onLongPress: () {
+                      _showRecordedVideoPreview(
+                        videoPath,
+                      );
+                    },
+
+                    child: Container(
+                      margin:
+                          const EdgeInsets.only(
+                        bottom: 10,
+                      ),
+                      height: 70,
+
+                      decoration: BoxDecoration(
+                        color: Colors.grey[900],
+                        borderRadius:
+                            BorderRadius.circular(10),
+                        border: Border.all(
+                          color: Colors.redAccent,
+                          width: 2,
+                        ),
+                      ),
+
+                      child: ClipRRect(
+                        borderRadius:
+                            BorderRadius.circular(8),
+
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            // -------------------------------------------------
+                            // 目前先使用黑底
+                            // 下一步再換成影片第一幀縮圖
+                            // -------------------------------------------------
+                            Container(
+                              color: Colors.black87,
+                            ),
+
+                            const Center(
+                              child: Icon(
+                                Icons.videocam,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                            ),
+
+                            // -------------------------------------------------
+                            // VIDEO 標籤
+                            // -------------------------------------------------
+                            Positioned(
+                              left: 5,
+                              bottom: 5,
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 2,
+                                ),
+                                decoration:
+                                    BoxDecoration(
+                                  color: Colors.black87,
+                                  borderRadius:
+                                      BorderRadius.circular(
+                                    5,
+                                  ),
+                                ),
+                                child: const Text(
+                                  'VIDEO',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8,
+                                    fontWeight:
+                                        FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            // -------------------------------------------------
+                            // 影片檔案不存在
+                            // -------------------------------------------------
+                            if (!videoFile.existsSync())
+                              const Center(
+                                child: Icon(
+                                  Icons.error_outline,
+                                  color:
+                                      Colors.redAccent,
+                                  size: 24,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+),
 
             if (_captureAnimation)
               Positioned(

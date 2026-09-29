@@ -933,92 +933,116 @@ Future<String> capturePhoto() async {
   }
 }
 
-  // ---------------------------------------------------------------------------
+   // ---------------------------------------------------------------------------
   // Live Photo
   // ---------------------------------------------------------------------------
 
   @override
-Future<LivePhotoCapture> captureLivePhoto() async {
-  if (_useNativeIOSCamera) {
-    final result =
-        await _proChannel.invokeMethod<Map<dynamic, dynamic>>(
-      'captureLivePhoto',
-    );
+  Future<LivePhotoCapture> captureLivePhoto() async {
+    // -----------------------------------------------------------------------
+    // iOS 原生 AVFoundation
+    // -----------------------------------------------------------------------
 
-    if (result == null) {
-      throw StateError(
-        'Live Photo 拍攝失敗：原生相機沒有回傳資料',
+    if (_useNativeIOSCamera) {
+      final result =
+          await _proChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'captureLivePhoto',
+      );
+
+      if (result == null) {
+        throw StateError(
+          'Live Photo 拍攝失敗：原生相機沒有回傳資料',
+        );
+      }
+
+      final photoPath =
+          result['photoPath']?.toString();
+
+      final videoPath =
+          result['videoPath']?.toString();
+
+      final assetIdentifier =
+          result['assetIdentifier']?.toString();
+
+      if (photoPath == null ||
+          photoPath.isEmpty ||
+          videoPath == null ||
+          videoPath.isEmpty ||
+          assetIdentifier == null ||
+          assetIdentifier.isEmpty) {
+        throw StateError(
+          'Live Photo 拍攝失敗：照片、影片或 Asset Identifier 無效',
+        );
+      }
+
+      return LivePhotoCapture(
+        photoPath: photoPath,
+        videoPath: videoPath,
+        assetIdentifier: assetIdentifier,
       );
     }
 
-    final photoPath =
-        result['photoPath']?.toString();
+    // -----------------------------------------------------------------------
+    // 非 iOS / Flutter Camera
+    //
+    // Flutter Camera 沒有真正的 Apple Live Photo，
+    // 這裡只保留目前的「照片 + 短影片」模擬結構。
+    // -----------------------------------------------------------------------
 
-    final videoPath =
-        result['videoPath']?.toString();
+    final controller = _controller;
 
-    if (photoPath == null ||
-        photoPath.isEmpty ||
-        videoPath == null ||
-        videoPath.isEmpty) {
-      throw StateError(
-        'Live Photo 拍攝失敗：照片或影片路徑無效',
-      );
+    if (controller == null ||
+        !controller.value.isInitialized) {
+      throw StateError('相機尚未初始化');
     }
+
+    if (controller.value.isRecordingVideo) {
+      throw StateError('相機正在錄影');
+    }
+
+    final wasStreaming =
+        controller.value.isStreamingImages;
+
+    if (wasStreaming) {
+      await controller.stopImageStream();
+    }
+
+    late final String photoPath;
+    late final XFile videoFile;
+
+    try {
+      photoPath =
+          (await controller.takePicture()).path;
+
+      await controller.startVideoRecording();
+
+      await Future<void>.delayed(
+        const Duration(milliseconds: 1500),
+      );
+
+      videoFile =
+          await controller.stopVideoRecording();
+    } finally {
+      if (wasStreaming &&
+          controller.value.isInitialized) {
+        await controller.startImageStream(
+          _handleCameraImage,
+        );
+      }
+    }
+
+    // 非 iOS 只是提供一組識別值，
+    // 不代表它能直接形成 Apple Photos 的真正 Live Photo。
+    final assetIdentifier =
+        '${DateTime.now().microsecondsSinceEpoch}-'
+        '${DateTime.now().microsecondsSinceEpoch.hashCode}';
 
     return LivePhotoCapture(
       photoPath: photoPath,
-      videoPath: videoPath,
+      videoPath: videoFile.path,
+      assetIdentifier: assetIdentifier,
     );
   }
-
-  final controller = _controller;
-
-  if (controller == null ||
-      !controller.value.isInitialized) {
-    throw StateError('相機尚未初始化');
-  }
-
-  if (controller.value.isRecordingVideo) {
-    throw StateError('相機正在錄影');
-  }
-
-  final wasStreaming =
-      controller.value.isStreamingImages;
-
-  if (wasStreaming) {
-    await controller.stopImageStream();
-  }
-
-  late final String photoPath;
-  late final XFile videoFile;
-
-  try {
-    photoPath =
-        (await controller.takePicture()).path;
-
-    await controller.startVideoRecording();
-
-    await Future<void>.delayed(
-      const Duration(milliseconds: 1500),
-    );
-
-    videoFile =
-        await controller.stopVideoRecording();
-  } finally {
-    if (wasStreaming &&
-        controller.value.isInitialized) {
-      await controller.startImageStream(
-        _handleCameraImage,
-      );
-    }
-  }
-
-  return LivePhotoCapture(
-    photoPath: photoPath,
-    videoPath: videoFile.path,
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Native iOS Video Recording
@@ -1104,4 +1128,25 @@ Future<String> stopVideoRecording() async {
 
     return results;
   }
+
+
+Future<bool> saveLivePhoto({
+  required String photoPath,
+  required String videoPath,
+}) async {
+  if (!_useNativeIOSCamera) {
+    return false;
+  }
+
+  final result = await _proChannel.invokeMethod<bool>(
+    'saveLivePhoto',
+    {
+      'photoPath': photoPath,
+      'videoPath': videoPath,
+    },
+  );
+
+  return result ?? false;
+}
+
 }
