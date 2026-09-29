@@ -152,10 +152,10 @@ final class ProCameraManager: NSObject {
       session.commitConfiguration()
     }
 
-    // Photo quality
-    if session.canSetSessionPreset(.high) {
-      session.sessionPreset = .high
-    }
+  // Photo / Live Photo quality
+  if session.canSetSessionPreset(.photo) {
+    session.sessionPreset = .photo
+  }
 
     // Remove old input
     if let currentInput = currentInput {
@@ -196,8 +196,12 @@ final class ProCameraManager: NSObject {
       session.addOutput(photoOutput)
 
       if photoOutput.isLivePhotoCaptureSupported {
-          photoOutput.isLivePhotoCaptureEnabled = true
-          photoOutput.isLivePhotoAutoTrimmingEnabled = true
+        photoOutput.isLivePhotoCaptureEnabled = true
+        photoOutput.isLivePhotoAutoTrimmingEnabled = true
+
+        print("📸 Live Photo: supported")
+      } else {
+        print("⚠️ Live Photo: NOT supported")
       }
 
       if #available(iOS 16.0, *) {

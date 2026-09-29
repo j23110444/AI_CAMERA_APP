@@ -701,8 +701,8 @@ Future<String> _applyLivePhotoVideoEffects(
     final paletteColor = _paletteColor(_selectedPalette);
 
     final paletteOpacity =
-        (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12))
-            .clamp(0.04, 0.21);
+        (0.08 + (_paletteX * 0.10) + (_paletteY * 0.20))
+            .clamp(0.08, 0.35);
 
     final r = paletteColor.r / 255.0;
     final g = paletteColor.g / 255.0;
@@ -726,7 +726,7 @@ Future<String> _applyLivePhotoVideoEffects(
 
   if (exposure != 0) {
     final exposureOpacity =
-        (exposure.abs() * 0.12).clamp(0.0, 0.24);
+        (exposure.abs() * 0.18).clamp(0.0, 0.36);
 
     final multiplier = exposure >= 0
         ? 1.0 + exposureOpacity
@@ -859,22 +859,22 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
   switch (_filterMode) {
     case '鮮明':
       filterColor = Colors.orange;
-      filterOpacity = 0.06;
+      filterOpacity = 0.18;
       break;
 
     case '溫暖':
       filterColor = Colors.amber;
-      filterOpacity = 0.08;
+      filterOpacity = 0.22;
       break;
 
     case '冷色':
       filterColor = Colors.blue;
-      filterOpacity = 0.08;
+      filterOpacity = 0.20;
       break;
 
     case '復古':
       filterColor = Colors.brown;
-      filterOpacity = 0.10;
+      filterOpacity = 0.22;
       break;
 
     default:
@@ -933,7 +933,7 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
     processed = _applyColorOverlay(
       processed,
       Colors.indigo,
-      0.08,
+      0.16,
     );
   }
 
@@ -3853,11 +3853,21 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                   }
 
                   // ------------------------------------------------
-                  // ② 保存
+                  // ② 保存到 Apple 照片
                   // ------------------------------------------------
-                  final savedSuccessfully = await _saveCandidateToGallery(
-                    itemPath,
-                  );
+                  final savedSuccessfully =
+                      await _saveImageToApplePhotos(itemPath);
+
+                  if (savedSuccessfully) {
+                    setState(() {
+                      if (currentIndex >= 0 &&
+                          currentIndex < _capturedImages.length) {
+                        _capturedImages.removeAt(currentIndex);
+                      }
+                    });
+
+                    await _persistImageLists();
+                  }
 
                   if (!mounted) {
                     isAnimating = false;
@@ -3967,9 +3977,9 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
 
                   isAnimating = false;
                   if (!dialogContext.mounted) return;
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                 ScaffoldMessenger.of(dialogContext).showSnackBar(
                     const SnackBar(
-                      content: Text('✅ 已保存至永久相簿'),
+                      content: Text('✅ 已保存到 Apple 照片'),
                       duration: Duration(milliseconds: 800),
                     ),
                   );
@@ -4479,36 +4489,6 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // ==================================================
-                        // App 內相簿 → Apple 照片
-                        // 只有永久相簿才顯示
-                        // ==================================================
-                        if (showSavedImages)
-                          Material(
-                            color: Colors.black.withValues(alpha: 0.5),
-                            shape: const CircleBorder(),
-                            child: IconButton(
-                              tooltip: '保存到 Apple 照片',
-                              icon: const Icon(
-                                Icons.download_rounded,
-                                color: Colors.white,
-                                size: 28,
-                              ),
-                              onPressed: () async {
-                                if (isAnimating) return;
-
-                                if (currentIndex < 0 ||
-                                    currentIndex >= galleryImages.length) {
-                                  return;
-                                }
-
-                                final imagePath = galleryImages[currentIndex];
-
-                                await _saveImageToApplePhotos(imagePath);
-                              },
-                            ),
-                          ),
-
                         if (showSavedImages) const SizedBox(width: 8),
 
                         // ==================================================
