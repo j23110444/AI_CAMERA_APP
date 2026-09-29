@@ -1414,34 +1414,11 @@ private final class LivePhotoCaptureDelegate:
             return
         }
 
-        // ---------------------------------------------------------------
-        // Live Photo Asset Identifier
+        // Live Photo 的 Content Identifier
         //
-        // AVCapturePhotoOutput 會自動產生 Live Photo identifier，
-        // 並寫入照片的 EXIF MakerNote。
-        // 這裡只讀取 Apple 已產生的 identifier，
-        // 不自行猜測 metadata。
-        // ---------------------------------------------------------------
-
-        if let exif =
-            photo.metadata[
-                kCGImagePropertyExifDictionary as String
-            ] as? [String: Any],
-
-           let makerNote =
-            exif[
-                kCGImagePropertyMakerNoteDictionary as String
-            ] as? [String: Any] {
-
-            for (_, value) in makerNote {
-                if let value = value as? String,
-                   !value.isEmpty {
-
-                    assetIdentifier = value
-                    break
-                }
-            }
-        }
+        // 目前先保留 AVFoundation 原始產生的 JPEG / MOV。
+        // 不在這裡自行解析或猜測 MakerNote。
+        assetIdentifier = nil
 
         do {
             try data.write(
