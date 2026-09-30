@@ -4286,46 +4286,66 @@ bool _isLivePhoto(String photoPath) {
                 // ==================================================
                 key: ValueKey<String>(itemPath),
 
-                child: AnimatedContainer(
-                  duration: isDragging
-                      ? Duration.zero
-                      : const Duration(milliseconds: 220),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
 
-                  curve: Curves.easeOutCubic,
+                  // ==================================================
+                  // 長按放大照片 → 播放 Live Photo
+                  // ==================================================
+                  onLongPress: () {
+                    if (!_isLivePhoto(itemPath)) {
+                      return;
+                    }
 
-                  transform: Matrix4.identity()
-                    ..translateByDouble(
-                      horizontalDragOffset,
-                      verticalAnimationOffset,
-                      0.0,
-                      1.0,
-                    )
-                    ..rotateZ(horizontalDragOffset * 0.00035),
-                  transformAlignment: Alignment.center,
-
-                  width: 320,
-                  height: 440,
-
-                  decoration: BoxDecoration(
-                    color: Colors.grey[900],
-
-                    borderRadius: BorderRadius.circular(20),
-
-                    border: Border.all(
-                      color: isRealImage
-                          ? Colors.yellowAccent
-                          : Colors.orangeAccent,
-                      width: 2,
-                    ),
-
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        blurRadius: 20,
-                        spreadRadius: 2,
+                    unawaited(
+                      _showLivePhotoPreview(
+                        itemPath,
+                        showSavedImages: showSavedImages,
                       ),
-                    ],
-                  ),
+                    );
+                  },
+
+                  child: AnimatedContainer(
+                    duration: isDragging
+                        ? Duration.zero
+                        : const Duration(milliseconds: 220),
+
+                    curve: Curves.easeOutCubic,
+
+                    transform: Matrix4.identity()
+                      ..translateByDouble(
+                        horizontalDragOffset,
+                        verticalAnimationOffset,
+                        0.0,
+                        1.0,
+                      )
+                      ..rotateZ(horizontalDragOffset * 0.00035),
+
+                    transformAlignment: Alignment.center,
+
+                    width: 320,
+                    height: 440,
+
+                    decoration: BoxDecoration(
+                      color: Colors.grey[900],
+
+                      borderRadius: BorderRadius.circular(20),
+
+                      border: Border.all(
+                        color: isRealImage
+                            ? Colors.yellowAccent
+                            : Colors.orangeAccent,
+                        width: 2,
+                      ),
+
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
 
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(18),
@@ -4381,54 +4401,6 @@ bool _isLivePhoto(String photoPath) {
                                   ),
                                 ),
                               ],
-                            ),
-                          ),
-
-                        // =================================================
-                        // AI 精選
-                        // =================================================
-                        if (isRealImage)
-                          Positioned(
-                            top: 12,
-                            left: 12,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.75),
-
-                                borderRadius: BorderRadius.circular(10),
-
-                                border: Border.all(
-                                  color: Colors.yellowAccent,
-                                  width: 1,
-                                ),
-                              ),
-
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.auto_awesome,
-                                    color: Colors.yellowAccent,
-                                    size: 16,
-                                  ),
-
-                                  SizedBox(width: 5),
-
-                                  Text(
-                                    'AI 精選',
-                                    style: TextStyle(
-                                      color: Colors.yellowAccent,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ),
                           ),
 
@@ -4595,7 +4567,8 @@ bool _isLivePhoto(String photoPath) {
                     ),
                   ),
                 ),
-              );
+                )
+              );           
             }
 
             // ============================================================
@@ -4892,29 +4865,7 @@ bool _isLivePhoto(String photoPath) {
                         index,
                         showSavedImages: true,
                       );
-                    },
-
-                    onLongPressStart: (_) {
-                      debugPrint(
-                        'LONG PRESS START APP ALBUM: $imagePath',
-                      );
-
-                      if (!_isLivePhoto(imagePath)) {
-                        _showAiTip(
-                          '這張照片沒有 Live Photo MOV',
-                        );
-                        return;
-                      }
-
-                      Navigator.pop(sheetContext);
-
-                      unawaited(
-                        _showLivePhotoPreview(
-                          imagePath,
-                          showSavedImages: true,
-                        ),
-                      );
-                    },
+                    },                   
 
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(4),
@@ -6404,31 +6355,7 @@ bool _isLivePhoto(String photoPath) {
                               index,
                             );
                           },
-
-                          onLongPressStart: (_) {
-                            debugPrint(
-                              'LONG PRESS START: $itemPath',
-                            );
-
-                            if (!_isLivePhoto(itemPath)) {
-                              _showAiTip(
-                                '這張照片沒有 Live Photo MOV',
-                              );
-                              return;
-                            }
-
-                            _showAiTip(
-                              '正在播放 Live Photo',
-                            );
-
-                            unawaited(
-                              _showLivePhotoPreview(
-                                itemPath,
-                              ),
-                            );
-                          },
-
-                          
+                     
                         child: Stack(
                           children: [
                             Container(
