@@ -2127,13 +2127,6 @@ private final class LivePhotoCaptureDelegate:
       return
     }
 
-    // 保留 AVFoundation 原始 Live Photo 資料。
-    //
-    // 不在這裡重新編碼，
-    // 避免破壞 Live Photo 配對資訊。
-
-    assetIdentifier = nil
-
     do {
 
       try data.write(

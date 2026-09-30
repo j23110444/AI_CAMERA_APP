@@ -5020,6 +5020,7 @@ bool _isLivePhoto(String photoPath) {
                       // -----------------------------------------------------------
                       onLongPress: () {
                         if (!_isLivePhoto(imagePath)) {
+                          _showAiTip('這張照片沒有 Live Photo MOV');
                           return;
                         }
 
@@ -6535,8 +6536,11 @@ bool _isLivePhoto(String photoPath) {
                       // -----------------------------------------------------------
                       onLongPress: () {
                           if (!_isLivePhoto(itemPath)) {
+                            _showAiTip('這張照片沒有 Live Photo MOV');
                             return;
                           }
+
+                          _showAiTip('正在播放 Live Photo');
 
                           _showLivePhotoPreview(itemPath);
                         },
