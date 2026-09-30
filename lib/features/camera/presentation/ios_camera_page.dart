@@ -6428,79 +6428,94 @@ bool _isLivePhoto(String photoPath) {
                             );
                           },
 
-                          child: Container(
-                          margin:
-                              const EdgeInsets.only(
-                            bottom: 10,
-                          ),
-                          height: 70,
-
-                          decoration: BoxDecoration(
-                            color: Colors.grey[800],
-                            borderRadius:
-                                BorderRadius.circular(10),
-                            border: Border.all(
-                              color: Colors.yellowAccent,
-                              width: 2,
+                          
+                        child: Stack(
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(
+                                bottom: 10,
+                              ),
+                              height: 70,
+                              decoration: BoxDecoration(
+                                color: Colors.grey[800],
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: Colors.yellowAccent,
+                                  width: 2,
+                                ),
+                              ),
+                              child: isRealImage
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.file(
+                                        imageFile,
+                                        width: double.infinity,
+                                        height: double.infinity,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (
+                                          context,
+                                          error,
+                                          stackTrace,
+                                        ) {
+                                          return const Icon(
+                                            Icons.broken_image,
+                                            color: Colors.redAccent,
+                                            size: 26,
+                                          );
+                                        },
+                                      ),
+                                    )
+                                  : Center(
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          const Icon(
+                                            Icons.image,
+                                            size: 20,
+                                            color: Colors.yellowAccent,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '#${index + 1}',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                             ),
-                          ),
-
-                          child: isRealImage
-                              ? ClipRRect(
-                                  borderRadius:
-                                      BorderRadius.circular(
-                                    8,
+                            if (_isLivePhoto(itemPath))
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 3,
                                   ),
-                                  child: Image.file(
-                                    imageFile,
-                                    width: double.infinity,
-                                    height: double.infinity,
-                                    fit: BoxFit.cover,
-                                    errorBuilder:
-                                        (
-                                      context,
-                                      error,
-                                      stackTrace,
-                                    ) {
-                                      return const Icon(
-                                        Icons.broken_image,
-                                        color:
-                                            Colors.redAccent,
-                                        size: 26,
-                                      );
-                                    },
+                                  decoration: BoxDecoration(
+                                    color: Colors.black87,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: Colors.white,
+                                    ),
                                   ),
-                                )
-                              : Center(
-                                  child: Column(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment
-                                            .center,
-                                    children: [
-                                      const Icon(
-                                        Icons.image,
-                                        size: 20,
-                                        color:
-                                            Colors.yellowAccent,
-                                      ),
-                                      const SizedBox(
-                                        height: 2,
-                                      ),
-                                      Text(
-                                        '#${index + 1}',
-                                        style:
-                                            const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight:
-                                              FontWeight.bold,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
+                                  child: const Text(
+                                    'LIVE',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
+                              ),
+                          ],
                         ),
-                      ),
+                        )
                     );
                   }
 
