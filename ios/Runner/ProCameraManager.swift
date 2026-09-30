@@ -221,36 +221,54 @@ final class ProCameraManager: NSObject {
     currentPosition = position
     currentLensType = lensType
 
+    if photoOutput.isLivePhotoCaptureSupported {
+        photoOutput.isLivePhotoCaptureEnabled = true
+        photoOutput.isLivePhotoAutoTrimmingEnabled = true
+
+        print(
+            "📸 Live Photo: re-enabled after camera switch"
+        )
+    }
+
+    configureConnection()
+
     // ------------------------------------------------------------
     // Photo output
     // ------------------------------------------------------------
 
     if !session.outputs.contains(photoOutput) {
 
-      guard session.canAddOutput(photoOutput) else {
+    guard session.canAddOutput(photoOutput) else {
         throw CameraManagerError.cannotAddPhotoOutput
+    }
+
+    session.addOutput(photoOutput)
       }
 
-      session.addOutput(photoOutput)
+      // ------------------------------------------------------------
+      // Live Photo
+      // ------------------------------------------------------------
 
       if photoOutput.isLivePhotoCaptureSupported {
 
-        photoOutput.isLivePhotoCaptureEnabled = true
-        photoOutput.isLivePhotoAutoTrimmingEnabled = true
+          photoOutput.isLivePhotoCaptureEnabled = true
+          photoOutput.isLivePhotoAutoTrimmingEnabled = true
 
-        print("📸 Live Photo: supported")
+          print(
+              "📸 Live Photo: enabled =",
+              photoOutput.isLivePhotoCaptureEnabled
+          )
 
       } else {
 
-        print("⚠️ Live Photo: NOT supported")
+          print("⚠️ Live Photo: NOT supported")
       }
 
       if #available(iOS 16.0, *) {
 
-        photoOutput.maxPhotoQualityPrioritization =
-          .quality
+          photoOutput.maxPhotoQualityPrioritization =
+              .quality
       }
-    }
 
     // ------------------------------------------------------------
     // Video output
@@ -987,29 +1005,43 @@ private func applyColorOverlay(
 
     sessionQueue.async { [weak self] in
 
-      guard let self = self else {
-        return
+        guard let self = self else {
+            return
+        }
+
+        self.session.beginConfiguration()
+
+        if self.session.outputs.contains(
+            self.movieOutput
+        ) {
+
+            self.session.removeOutput(
+                self.movieOutput
+            )
+        }
+
+        // ----------------------------------------------------
+        // 影片錄影結束後重新啟用 Live Photo
+        // ----------------------------------------------------
+
+        if self.photoOutput.isLivePhotoCaptureSupported {
+
+            self.photoOutput.isLivePhotoCaptureEnabled = true
+            self.photoOutput.isLivePhotoAutoTrimmingEnabled = true
+
+            print(
+                "📸 Live Photo: re-enabled after video"
+            )
+        }
+
+          self.session.commitConfiguration()
+
+          self.movieRecordingDelegate = nil
+
+          print(
+              "🎥 Movie output removed"
+          )
       }
-
-      self.session.beginConfiguration()
-
-      if self.session.outputs.contains(
-        self.movieOutput
-      ) {
-
-        self.session.removeOutput(
-          self.movieOutput
-        )
-      }
-
-      self.session.commitConfiguration()
-
-      self.movieRecordingDelegate = nil
-
-      print(
-        "🎥 Movie output removed"
-      )
-    }
   }
 
   // MARK: - Capture Live Photo
