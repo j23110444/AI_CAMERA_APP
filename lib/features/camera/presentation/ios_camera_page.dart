@@ -612,38 +612,45 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     });
   }
 
-img.Image _applyColorOverlay(
-  img.Image source,
-  Color color,
-  double opacity,
-) {
-  final result = img.Image.from(source);
+  img.Image _applyColorOverlay(
+    img.Image source,
+    Color color,
+    double opacity,
+  ) {
+    final result = img.Image.from(source);
 
-  final blend = opacity.clamp(0.0, 1.0);
+    final blend = opacity.clamp(0.0, 1.0);
 
-  final r = color.r.toInt();
-  final g = color.g.toInt();
-  final b = color.b.toInt();
+    final r = color.r.toInt();
+    final g = color.g.toInt();
+    final b = color.b.toInt();
 
-  for (final pixel in result) {
-    final originalR = pixel.r.toInt();
-    final originalG = pixel.g.toInt();
-    final originalB = pixel.b.toInt();
+    for (final pixel in result) {
+      final originalR = pixel.r.toInt();
+      final originalG = pixel.g.toInt();
+      final originalB = pixel.b.toInt();
 
-    pixel
-      ..r = (originalR * (1.0 - blend) + r * blend)
-          .round()
-          .clamp(0, 255)
-      ..g = (originalG * (1.0 - blend) + g * blend)
-          .round()
-          .clamp(0, 255)
-      ..b = (originalB * (1.0 - blend) + b * blend)
+      final newR = (originalR * (1.0 - blend) + r * blend)
           .round()
           .clamp(0, 255);
-  }
 
-  return result;
-}
+      final newG = (originalG * (1.0 - blend) + g * blend)
+          .round()
+          .clamp(0, 255);
+
+      final newB = (originalB * (1.0 - blend) + b * blend)
+          .round()
+          .clamp(0, 255);
+
+      pixel.setRgb(
+        newR,
+        newG,
+        newB,
+      );
+    }
+
+    return result;
+  }
 
 Future<String> _applyLivePhotoVideoEffects(
   String sourcePath,
@@ -868,7 +875,7 @@ _showEffectDebug(
   switch (_filterMode) {
     case '鮮明':
       filterColor = Colors.orange;
-      filterOpacity = 0.18;
+      filterOpacity = 0.70;
       break;
 
     case '溫暖':
