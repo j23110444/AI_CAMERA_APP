@@ -11,7 +11,8 @@ import 'camera_metrics.dart';
 import '../domain/scene_change_tracker.dart';
 
 class FlutterCameraAdapter implements CameraPort {
-  static const MethodChannel _proChannel = MethodChannel('ai_camera/pro');
+  static const MethodChannel _proChannel =
+      MethodChannel('ai_camera/pro');
 
   CameraController? _controller;
   List<CameraDescription> _cameras = const [];
@@ -35,21 +36,24 @@ class FlutterCameraAdapter implements CameraPort {
   final FrameDifferenceDetector _frameDifferenceDetector =
       const FrameDifferenceDetector();
 
-  final SceneChangeTracker _sceneChangeTracker = SceneChangeTracker();
+  final SceneChangeTracker _sceneChangeTracker =
+      SceneChangeTracker();
 
   List<int>? _previousAnalysisFrame;
 
   CameraController? get controller => _controller;
 
   @override
-  Stream<List<int>> get analysisFrames => _analysisFrameController.stream;
+  Stream<List<int>> get analysisFrames =>
+      _analysisFrameController.stream;
 
   @override
   Stream<FrameFeatures> get featureFrames =>
       _featureFrameController.stream;
 
   @override
-  Stream<CameraMetrics> get metrics => _metricsController.stream;
+  Stream<CameraMetrics> get metrics =>
+      _metricsController.stream;
 
   // ---------------------------------------------------------------------------
   // 初始化
@@ -65,12 +69,13 @@ class FlutterCameraAdapter implements CameraPort {
 
     _cameras = cameras;
 
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // iOS
     //
     // iOS 改由 AVFoundation / ProCameraBridge 管理實際鏡頭。
     // Flutter camera 不再負責 Wide / Ultra Wide 的鏡頭選擇。
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       _useNativeIOSCamera = true;
       _nativeLensType = 'wide';
@@ -86,16 +91,15 @@ class FlutterCameraAdapter implements CameraPort {
       return;
     }
 
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // 非 iOS
-    //
-    // 維持原本 Flutter Camera 行為。
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
 
     final rearCameras = cameras
         .where(
           (camera) =>
-              camera.lensDirection == CameraLensDirection.back,
+              camera.lensDirection ==
+              CameraLensDirection.back,
         )
         .toList();
 
@@ -108,7 +112,9 @@ class FlutterCameraAdapter implements CameraPort {
             !name.contains('tele');
       },
       orElse: () =>
-          rearCameras.isNotEmpty ? rearCameras.first : cameras.first,
+          rearCameras.isNotEmpty
+              ? rearCameras.first
+              : cameras.first,
     );
 
     _cameraIndex = cameras.indexOf(preferredRear);
@@ -118,8 +124,6 @@ class FlutterCameraAdapter implements CameraPort {
 
   // ---------------------------------------------------------------------------
   // Flutter Camera 初始化
-  //
-  // 非 iOS 使用。
   // ---------------------------------------------------------------------------
 
   Future<void> _initializeController(
@@ -135,33 +139,37 @@ class FlutterCameraAdapter implements CameraPort {
 
     await _controller!.initialize();
 
-    await _controller!.startImageStream(_handleCameraImage);
+    await _controller!.startImageStream(
+      _handleCameraImage,
+    );
   }
 
   // ---------------------------------------------------------------------------
   // Flutter Camera → Native Camera Bridge
-  //
-  // 非 iOS / Flutter Camera 使用。
   // ---------------------------------------------------------------------------
 
   Future<void> _selectNativeCamera(
     CameraDescription camera,
   ) async {
-    final lensType = camera.lensDirection == CameraLensDirection.front
-        ? 'wide'
-        : _looksLikeUltraWide(camera.name)
-            ? 'ultraWide'
-            : _looksLikeTelephoto(camera.name)
-                ? 'telephoto'
-                : 'wide';
+    final lensType =
+        camera.lensDirection ==
+                CameraLensDirection.front
+            ? 'wide'
+            : _looksLikeUltraWide(camera.name)
+                ? 'ultraWide'
+                : _looksLikeTelephoto(camera.name)
+                    ? 'telephoto'
+                    : 'wide';
 
     try {
       await _proChannel.invokeMethod<void>(
         'selectCamera',
         {
-          'position': camera.lensDirection == CameraLensDirection.front
-              ? 'front'
-              : 'back',
+          'position':
+              camera.lensDirection ==
+                      CameraLensDirection.front
+                  ? 'front'
+                  : 'back',
           'lensType': lensType,
         },
       );
@@ -172,9 +180,6 @@ class FlutterCameraAdapter implements CameraPort {
 
   // ---------------------------------------------------------------------------
   // 舊版 Flutter Camera 的鏡頭名稱判斷
-  //
-  // 目前只給非 iOS 使用。
-  // iOS 會直接使用 AVFoundation。
   // ---------------------------------------------------------------------------
 
   bool _looksLikeUltraWide(String name) {
@@ -201,15 +206,11 @@ class FlutterCameraAdapter implements CameraPort {
 
   @override
   Future<void> switchCamera() async {
-    // -----------------------------------------------------------------------
-    // iOS
-    //
-    // 目前先交給原生 AVFoundation。
-    // 後續 ProCameraManager 會處理 front / back。
-    // -----------------------------------------------------------------------
     if (_useNativeIOSCamera) {
       final nextPosition =
-          _nativeLensType == 'front' ? 'back' : 'front';
+          _nativeLensType == 'front'
+              ? 'back'
+              : 'front';
 
       await _proChannel.invokeMethod<void>(
         'selectCamera',
@@ -219,25 +220,25 @@ class FlutterCameraAdapter implements CameraPort {
         },
       );
 
-      _nativeLensType = nextPosition == 'front'
-          ? 'front'
-          : 'wide';
+      _nativeLensType =
+          nextPosition == 'front'
+              ? 'front'
+              : 'wide';
 
       return;
     }
 
-    // -----------------------------------------------------------------------
-    // 非 iOS
-    // -----------------------------------------------------------------------
-
     if (_cameras.length < 2) {
-      throw StateError('裝置沒有可切換的前後鏡頭');
+      throw StateError(
+        '裝置沒有可切換的前後鏡頭',
+      );
     }
 
     final current = _cameras[_cameraIndex];
 
     final desiredDirection =
-        current.lensDirection == CameraLensDirection.back
+        current.lensDirection ==
+                CameraLensDirection.back
             ? CameraLensDirection.front
             : CameraLensDirection.back;
 
@@ -246,12 +247,15 @@ class FlutterCameraAdapter implements CameraPort {
         .entries
         .where(
           (entry) =>
-              entry.value.lensDirection == desiredDirection,
+              entry.value.lensDirection ==
+              desiredDirection,
         )
         .toList();
 
     if (candidates.isEmpty) {
-      throw StateError('找不到相反方向的相機');
+      throw StateError(
+        '找不到相反方向的相機',
+      );
     }
 
     final next = candidates.first;
@@ -273,12 +277,6 @@ class FlutterCameraAdapter implements CameraPort {
 
   @override
   Future<void> switchToUltraWide() async {
-    // -----------------------------------------------------------------------
-    // iOS
-    //
-    // 真正的 0.5x 由 AVFoundation 控制。
-    // 不再依賴 CameraDescription。
-    // -----------------------------------------------------------------------
     if (_useNativeIOSCamera) {
       await _proChannel.invokeMethod<void>(
         'selectCamera',
@@ -293,21 +291,20 @@ class FlutterCameraAdapter implements CameraPort {
       return;
     }
 
-    // -----------------------------------------------------------------------
-    // 非 iOS
-    // -----------------------------------------------------------------------
-
     final rearCameras = _cameras
         .asMap()
         .entries
         .where(
           (entry) =>
-              entry.value.lensDirection == CameraLensDirection.back,
+              entry.value.lensDirection ==
+              CameraLensDirection.back,
         )
         .toList();
 
     final ultraWide = rearCameras.where((entry) {
-      return _looksLikeUltraWide(entry.value.name);
+      return _looksLikeUltraWide(
+        entry.value.name,
+      );
     }).toList();
 
     if (ultraWide.isEmpty) {
@@ -335,10 +332,6 @@ class FlutterCameraAdapter implements CameraPort {
 
   @override
   Future<void> switchToStandardWide() async {
-    // -----------------------------------------------------------------------
-    // iOS
-    // -----------------------------------------------------------------------
-
     if (_useNativeIOSCamera) {
       await _proChannel.invokeMethod<void>(
         'selectCamera',
@@ -353,21 +346,19 @@ class FlutterCameraAdapter implements CameraPort {
       return;
     }
 
-    // -----------------------------------------------------------------------
-    // 非 iOS
-    // -----------------------------------------------------------------------
-
     final rearCameras = _cameras
         .asMap()
         .entries
         .where(
           (entry) =>
-              entry.value.lensDirection == CameraLensDirection.back,
+              entry.value.lensDirection ==
+              CameraLensDirection.back,
         )
         .toList();
 
     final standard = rearCameras.where((entry) {
-      final name = entry.value.name.toLowerCase();
+      final name =
+          entry.value.name.toLowerCase();
 
       return !name.contains('ultra') &&
           !name.contains('tele') &&
@@ -375,7 +366,9 @@ class FlutterCameraAdapter implements CameraPort {
     }).toList();
 
     final candidates =
-        standard.isNotEmpty ? standard : rearCameras;
+        standard.isNotEmpty
+            ? standard
+            : rearCameras;
 
     if (candidates.isEmpty) {
       throw StateError(
@@ -398,12 +391,11 @@ class FlutterCameraAdapter implements CameraPort {
 
   // ---------------------------------------------------------------------------
   // Camera Image Analysis
-  //
-  // 目前只有 Flutter Camera 使用。
   // ---------------------------------------------------------------------------
 
   void _handleCameraImage(CameraImage image) {
-    final bytes = _convertToAnalysisBytes(image);
+    final bytes =
+        _convertToAnalysisBytes(image);
 
     if (bytes.isEmpty) {
       return;
@@ -416,18 +408,25 @@ class FlutterCameraAdapter implements CameraPort {
     // -------------------------------------------------------------------------
 
     if (_frameIndex.isEven) {
-      final bins = List<int>.filled(32, 0);
+      final bins =
+          List<int>.filled(32, 0);
 
       var clipped = 0;
       var total = 0;
       var luminanceSum = 0;
 
       for (final value in bytes) {
-        final luminance = value.clamp(0, 255);
+        final luminance =
+            value.clamp(0, 255);
 
         bins[
-          (luminance * bins.length ~/ 256)
-              .clamp(0, bins.length - 1)
+          (luminance *
+                  bins.length ~/
+                  256)
+              .clamp(
+                0,
+                bins.length - 1,
+              )
         ]++;
 
         if (luminance >= 250) {
@@ -442,9 +441,12 @@ class FlutterCameraAdapter implements CameraPort {
         _metricsController.add(
           CameraMetrics(
             histogram: bins,
-            clippedHighlightRatio: clipped / total,
+            clippedHighlightRatio:
+                clipped / total,
             averageLuminance:
-                luminanceSum / total / 255,
+                luminanceSum /
+                    total /
+                    255,
           ),
         );
       }
@@ -454,7 +456,8 @@ class FlutterCameraAdapter implements CameraPort {
     // Scene Change Detection
     // -------------------------------------------------------------------------
 
-    final previousFrame = _previousAnalysisFrame;
+    final previousFrame =
+        _previousAnalysisFrame;
 
     if (previousFrame != null) {
       final result =
@@ -464,7 +467,9 @@ class FlutterCameraAdapter implements CameraPort {
       );
 
       final confirmedChange =
-          _sceneChangeTracker.update(result);
+          _sceneChangeTracker.update(
+        result,
+      );
 
       if (confirmedChange) {
         debugPrint(
@@ -518,7 +523,6 @@ class FlutterCameraAdapter implements CameraPort {
     _previousAnalysisFrame = null;
     _sceneChangeTracker.reset();
 
-    // iOS 原生相機
     if (_useNativeIOSCamera) {
       try {
         await _proChannel.invokeMethod<void>(
@@ -529,7 +533,6 @@ class FlutterCameraAdapter implements CameraPort {
       }
     }
 
-    // Flutter Camera
     await _controller?.dispose();
     _controller = null;
 
@@ -544,13 +547,6 @@ class FlutterCameraAdapter implements CameraPort {
 
   @override
   Future<void> setZoom(double value) async {
-    // -----------------------------------------------------------------------
-    // iOS
-    //
-    // 目前先交給 AVFoundation。
-    // 後續 ProCameraManager 會控制 videoZoomFactor。
-    // -----------------------------------------------------------------------
-
     if (_useNativeIOSCamera) {
       await _proChannel.invokeMethod<void>(
         'setZoom',
@@ -559,10 +555,6 @@ class FlutterCameraAdapter implements CameraPort {
 
       return;
     }
-
-    // -----------------------------------------------------------------------
-    // 非 iOS
-    // -----------------------------------------------------------------------
 
     final controller = _controller;
 
@@ -578,16 +570,12 @@ class FlutterCameraAdapter implements CameraPort {
         await controller.getMaxZoomLevel();
 
     final zoom =
-        value.clamp(minZoom, maxZoom).toDouble();
+        value.clamp(
+          minZoom,
+          maxZoom,
+        ).toDouble();
 
     await controller.setZoomLevel(zoom);
-
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      await _proChannel.invokeMethod<void>(
-        'setZoom',
-        zoom,
-      );
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -605,14 +593,9 @@ class FlutterCameraAdapter implements CameraPort {
       return;
     }
 
-    await _controller?.setExposureOffset(value);
-
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      await _proChannel.invokeMethod<void>(
-        'setExposureBias',
-        value,
-      );
-    }
+    await _controller?.setExposureOffset(
+      value,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -622,7 +605,8 @@ class FlutterCameraAdapter implements CameraPort {
   Future<void> setHdrEnabled(
     bool enabled,
   ) async {
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
+    if (defaultTargetPlatform ==
+        TargetPlatform.iOS) {
       await _proChannel.invokeMethod<void>(
         'setHDR',
         enabled,
@@ -639,7 +623,8 @@ class FlutterCameraAdapter implements CameraPort {
     required double iso,
     required double shutterSeconds,
   }) {
-    if (defaultTargetPlatform != TargetPlatform.iOS) {
+    if (defaultTargetPlatform !=
+        TargetPlatform.iOS) {
       return Future<void>.value();
     }
 
@@ -660,7 +645,8 @@ class FlutterCameraAdapter implements CameraPort {
   Future<void> setManualFocus(
     double position,
   ) {
-    if (defaultTargetPlatform != TargetPlatform.iOS) {
+    if (defaultTargetPlatform !=
+        TargetPlatform.iOS) {
       return Future<void>.value();
     }
 
@@ -681,7 +667,8 @@ class FlutterCameraAdapter implements CameraPort {
   Future<void> setWhiteBalance(
     double kelvin,
   ) {
-    if (defaultTargetPlatform != TargetPlatform.iOS) {
+    if (defaultTargetPlatform !=
+        TargetPlatform.iOS) {
       return Future<void>.value();
     }
 
@@ -702,7 +689,6 @@ class FlutterCameraAdapter implements CameraPort {
     double x,
     double y,
   ) async {
-    // iOS 原生相機後續改成 AVFoundation focusPointOfInterest。
     if (_useNativeIOSCamera) {
       await _proChannel.invokeMethod<void>(
         'setFocusPoint',
@@ -733,15 +719,6 @@ class FlutterCameraAdapter implements CameraPort {
     await controller.setExposurePoint(
       Offset(x, y),
     );
-
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      await _proChannel.invokeMethod<void>(
-        'setFocus',
-        {
-          'mode': 'auto',
-        },
-      );
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -756,18 +733,20 @@ class FlutterCameraAdapter implements CameraPort {
       await _proChannel.invokeMethod<void>(
         'setFocus',
         {
-          'mode': locked
-              ? 'locked'
-              : 'continuous',
+          'mode':
+              locked
+                  ? 'locked'
+                  : 'continuous',
         },
       );
 
       await _proChannel.invokeMethod<void>(
         'setExposureMode',
         {
-          'mode': locked
-              ? 'locked'
-              : 'continuous',
+          'mode':
+              locked
+                  ? 'locked'
+                  : 'continuous',
         },
       );
 
@@ -792,26 +771,6 @@ class FlutterCameraAdapter implements CameraPort {
           ? ExposureMode.locked
           : ExposureMode.auto,
     );
-
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      await _proChannel.invokeMethod<void>(
-        'setFocus',
-        {
-          'mode': locked
-              ? 'locked'
-              : 'continuous',
-        },
-      );
-
-      await _proChannel.invokeMethod<void>(
-        'setExposureMode',
-        {
-          'mode': locked
-              ? 'locked'
-              : 'continuous',
-        },
-      );
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -822,7 +781,6 @@ class FlutterCameraAdapter implements CameraPort {
   Future<void> setFlashMode(
     String mode,
   ) async {
-    // iOS 原生相機
     if (_useNativeIOSCamera) {
       await _proChannel.invokeMethod<void>(
         'setFlashMode',
@@ -832,7 +790,6 @@ class FlutterCameraAdapter implements CameraPort {
       return;
     }
 
-    // Flutter Camera
     final controller = _controller;
 
     if (controller == null) {
@@ -869,83 +826,158 @@ class FlutterCameraAdapter implements CameraPort {
           FlashMode.auto,
         );
     }
-
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      await _proChannel.invokeMethod<void>(
-        'setFlashMode',
-        mode,
-      );
-    }
   }
 
   // ---------------------------------------------------------------------------
   // Capture Photo
-  //
-  // iOS 原生 Camera 尚未接上 AVCapturePhotoOutput 前，
-  // 暫時保留原本 Flutter Camera。
   // ---------------------------------------------------------------------------
 
- @override
-Future<String> capturePhoto() async {
-  // -----------------------------------------------------------------------
-  // iOS 原生 AVFoundation
-  // -----------------------------------------------------------------------
+  @override
+  Future<String> capturePhoto() async {
+    // -------------------------------------------------------------------------
+    // iOS 原生 AVFoundation
+    // -------------------------------------------------------------------------
 
-  if (_useNativeIOSCamera) {
-    final path = await _proChannel.invokeMethod<String>(
-      'capturePhoto',
-    );
+    if (_useNativeIOSCamera) {
+      final path =
+          await _proChannel.invokeMethod<String>(
+        'capturePhoto',
+      );
 
-    if (path == null || path.isEmpty) {
-      throw StateError('拍照失敗：原生相機沒有回傳照片路徑');
+      if (path == null || path.isEmpty) {
+        throw StateError(
+          '拍照失敗：原生相機沒有回傳照片路徑',
+        );
+      }
+
+      return path;
     }
 
-    return path;
-  }
+    // -------------------------------------------------------------------------
+    // 非 iOS / Flutter Camera
+    // -------------------------------------------------------------------------
 
-  // -----------------------------------------------------------------------
-  // 非 iOS / Flutter Camera
-  // -----------------------------------------------------------------------
+    final controller = _controller;
 
-  final controller = _controller;
-
-  if (controller == null ||
-      !controller.value.isInitialized) {
-    throw StateError('相機尚未初始化');
-  }
-
-  final wasStreaming =
-      controller.value.isStreamingImages;
-
-  if (wasStreaming) {
-    await controller.stopImageStream();
-  }
-
-  try {
-    return (await controller.takePicture()).path;
-  } finally {
-    if (wasStreaming &&
-        controller.value.isInitialized) {
-      await controller.startImageStream(
-        _handleCameraImage,
+    if (controller == null ||
+        !controller.value.isInitialized) {
+      throw StateError(
+        '相機尚未初始化',
       );
     }
-  }
-}
 
-   // ---------------------------------------------------------------------------
+    final wasStreaming =
+        controller.value.isStreamingImages;
+
+    if (wasStreaming) {
+      await controller.stopImageStream();
+    }
+
+    try {
+      return (
+        await controller.takePicture()
+      ).path;
+    } finally {
+      if (wasStreaming &&
+          controller.value.isInitialized) {
+        await controller.startImageStream(
+          _handleCameraImage,
+        );
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Native Photo Effects
+  //
+  // iOS：
+  // Flutter → MethodChannel → ProCameraBridge
+  // → ProCameraManager → Core Image
+  //
+  // 非 iOS：
+  // 直接回傳原始照片。
+  // ---------------------------------------------------------------------------
+
+  Future<String?> applyPhotoEffects({
+    required String sourcePath,
+    required String filter,
+    required double paletteRed,
+    required double paletteGreen,
+    required double paletteBlue,
+    required double paletteOpacity,
+    required double exposure,
+    required bool nightMode,
+  }) async {
+    // -------------------------------------------------------------------------
+    // 非 iOS
+    //
+    // 目前原生 Core Image 只在 iOS 使用。
+    // -------------------------------------------------------------------------
+
+    if (!_useNativeIOSCamera) {
+      return sourcePath;
+    }
+
+    try {
+      final result =
+          await _proChannel.invokeMethod<String>(
+        'applyPhotoEffects',
+        {
+          'sourcePath': sourcePath,
+          'filter': filter,
+          'paletteRed': paletteRed,
+          'paletteGreen': paletteGreen,
+          'paletteBlue': paletteBlue,
+          'paletteOpacity': paletteOpacity,
+          'exposure': exposure,
+          'nightMode': nightMode,
+        },
+      );
+
+      if (result == null ||
+          result.isEmpty) {
+        throw StateError(
+          '原生 Core Image 沒有回傳處理後照片路徑',
+        );
+      }
+
+      debugPrint(
+        '🎨 Native photo effects completed: $result',
+      );
+
+      return result;
+    } on PlatformException catch (error) {
+      debugPrint(
+        '❌ Native photo effects PlatformException: '
+        '${error.code} / ${error.message}',
+      );
+
+      rethrow;
+    } catch (error, stackTrace) {
+      debugPrint(
+        '❌ Native photo effects failed: $error',
+      );
+
+      debugPrint('$stackTrace');
+
+      rethrow;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Live Photo
   // ---------------------------------------------------------------------------
 
   @override
   Future<LivePhotoCapture> captureLivePhoto() async {
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // iOS 原生 AVFoundation
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
 
     if (_useNativeIOSCamera) {
       final result =
-          await _proChannel.invokeMethod<Map<dynamic, dynamic>>(
+          await _proChannel
+              .invokeMethod<Map<dynamic, dynamic>>(
         'captureLivePhoto',
       );
 
@@ -962,7 +994,9 @@ Future<String> capturePhoto() async {
           result['videoPath']?.toString();
 
       final assetIdentifier =
-    result['assetIdentifier']?.toString() ?? '';
+          result['assetIdentifier']
+                  ?.toString() ??
+              '';
 
       if (photoPath == null ||
           photoPath.isEmpty ||
@@ -980,22 +1014,23 @@ Future<String> capturePhoto() async {
       );
     }
 
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // 非 iOS / Flutter Camera
-    //
-    // Flutter Camera 沒有真正的 Apple Live Photo，
-    // 這裡只保留目前的「照片 + 短影片」模擬結構。
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
 
     final controller = _controller;
 
     if (controller == null ||
         !controller.value.isInitialized) {
-      throw StateError('相機尚未初始化');
+      throw StateError(
+        '相機尚未初始化',
+      );
     }
 
     if (controller.value.isRecordingVideo) {
-      throw StateError('相機正在錄影');
+      throw StateError(
+        '相機正在錄影',
+      );
     }
 
     final wasStreaming =
@@ -1015,7 +1050,9 @@ Future<String> capturePhoto() async {
       await controller.startVideoRecording();
 
       await Future<void>.delayed(
-        const Duration(milliseconds: 1500),
+        const Duration(
+          milliseconds: 1500,
+        ),
       );
 
       videoFile =
@@ -1029,8 +1066,6 @@ Future<String> capturePhoto() async {
       }
     }
 
-    // 非 iOS 只是提供一組識別值，
-    // 不代表它能直接形成 Apple Photos 的真正 Live Photo。
     final assetIdentifier =
         '${DateTime.now().microsecondsSinceEpoch}-'
         '${DateTime.now().microsecondsSinceEpoch.hashCode}';
@@ -1042,64 +1077,72 @@ Future<String> capturePhoto() async {
     );
   }
 
-// ---------------------------------------------------------------------------
-// Native iOS Video Recording
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Native iOS Video Recording
+  // ---------------------------------------------------------------------------
 
-Future<void> startVideoRecording() async {
-  if (_useNativeIOSCamera) {
-    await _proChannel.invokeMethod<void>(
-      'startVideoRecording',
-    );
-    return;
-  }
+  Future<void> startVideoRecording() async {
+    if (_useNativeIOSCamera) {
+      await _proChannel.invokeMethod<void>(
+        'startVideoRecording',
+      );
 
-  final controller = _controller;
+      return;
+    }
 
-  if (controller == null ||
-      !controller.value.isInitialized) {
-    throw StateError('相機尚未初始化');
-  }
+    final controller = _controller;
 
-  if (controller.value.isRecordingVideo) {
-    return;
-  }
-
-  await controller.startVideoRecording();
-}
-
-Future<String> stopVideoRecording() async {
-  if (_useNativeIOSCamera) {
-    final path =
-        await _proChannel.invokeMethod<String>(
-      'stopVideoRecording',
-    );
-
-    if (path == null || path.isEmpty) {
+    if (controller == null ||
+        !controller.value.isInitialized) {
       throw StateError(
-        '影片錄影完成，但原生相機沒有回傳影片路徑',
+        '相機尚未初始化',
       );
     }
 
-    return path;
+    if (controller.value.isRecordingVideo) {
+      return;
+    }
+
+    await controller.startVideoRecording();
   }
 
-  final controller = _controller;
+  Future<String> stopVideoRecording() async {
+    if (_useNativeIOSCamera) {
+      final path =
+          await _proChannel
+              .invokeMethod<String>(
+        'stopVideoRecording',
+      );
 
-  if (controller == null ||
-      !controller.value.isInitialized) {
-    throw StateError('相機尚未初始化');
+      if (path == null || path.isEmpty) {
+        throw StateError(
+          '影片錄影完成，但原生相機沒有回傳影片路徑',
+        );
+      }
+
+      return path;
+    }
+
+    final controller = _controller;
+
+    if (controller == null ||
+        !controller.value.isInitialized) {
+      throw StateError(
+        '相機尚未初始化',
+      );
+    }
+
+    if (!controller.value.isRecordingVideo) {
+      throw StateError(
+        '目前沒有正在錄影',
+      );
+    }
+
+    final file =
+        await controller.stopVideoRecording();
+
+    return file.path;
   }
-
-  if (!controller.value.isRecordingVideo) {
-    throw StateError('目前沒有正在錄影');
-  }
-
-  final file =
-      await controller.stopVideoRecording();
-
-  return file.path;
-}
 
   // ---------------------------------------------------------------------------
   // Burst
@@ -1127,24 +1170,27 @@ Future<String> stopVideoRecording() async {
     return results;
   }
 
+  // ---------------------------------------------------------------------------
+  // Save Live Photo
+  // ---------------------------------------------------------------------------
 
-Future<bool> saveLivePhoto({
-  required String photoPath,
-  required String videoPath,
-}) async {
-  if (!_useNativeIOSCamera) {
-    return false;
+  Future<bool> saveLivePhoto({
+    required String photoPath,
+    required String videoPath,
+  }) async {
+    if (!_useNativeIOSCamera) {
+      return false;
+    }
+
+    final result =
+        await _proChannel.invokeMethod<bool>(
+      'saveLivePhoto',
+      {
+        'photoPath': photoPath,
+        'videoPath': videoPath,
+      },
+    );
+
+    return result ?? false;
   }
-
-  final result = await _proChannel.invokeMethod<bool>(
-    'saveLivePhoto',
-    {
-      'photoPath': photoPath,
-      'videoPath': videoPath,
-    },
-  );
-
-  return result ?? false;
-}
-
 }

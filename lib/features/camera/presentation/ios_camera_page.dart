@@ -612,46 +612,6 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     });
   }
 
-  img.Image _applyColorOverlay(
-    img.Image source,
-    Color color,
-    double opacity,
-  ) {
-    final result = img.Image.from(source);
-
-    final blend = opacity.clamp(0.0, 1.0);
-
-    final r = color.r.toInt();
-    final g = color.g.toInt();
-    final b = color.b.toInt();
-
-    for (final pixel in result) {
-      final originalR = pixel.r.toInt();
-      final originalG = pixel.g.toInt();
-      final originalB = pixel.b.toInt();
-
-      final newR = (originalR * (1.0 - blend) + r * blend)
-          .round()
-          .clamp(0, 255);
-
-      final newG = (originalG * (1.0 - blend) + g * blend)
-          .round()
-          .clamp(0, 255);
-
-      final newB = (originalB * (1.0 - blend) + b * blend)
-          .round()
-          .clamp(0, 255);
-
-      pixel.setRgb(
-        newR,
-        newG,
-        newB,
-      );
-    }
-
-    return result;
-  }
-
 Future<String> _applyLivePhotoVideoEffects(
   String sourcePath,
 ) async {
@@ -845,164 +805,148 @@ String _quoteFFmpegArgument(String value) {
 }
 
 Future<String> _applyPhotoEffects(String sourcePath) async {
-  _showEffectDebug('④-1 進入特效處理');
+  _showEffectDebug('④-1 進入原生特效處理');
+
   final sourceFile = File(sourcePath);
 
   if (!await sourceFile.exists()) {
     throw Exception('找不到照片檔案');
   }
 
-  final bytes = await sourceFile.readAsBytes();
-  final original = img.decodeImage(bytes);
+  try {
+    // ====================================================
+    // 1. 取得調色盤顏色
+    // ====================================================
 
-  if (original == null) {
-    throw Exception('無法解析照片');
-  }
-_showEffectDebug(
-  '④-2 照片解析成功\n'
-  'Filter：$_filterMode\n'
-  'Palette：$_selectedPalette\n'
-  'Exposure：$_exposureValue',);
+    final paletteColor = _paletteColor(_selectedPalette);
 
-  img.Image processed = img.Image.from(original);
+    final paletteOpacity =
+        _selectedPalette == '原味'
+            ? 0.0
+            : (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12))
+                .clamp(0.04, 0.21);
 
-  // ====================================================
-  // 1. 濾鏡
-  // ====================================================
-  Color? filterColor;
-  double filterOpacity = 0.0;
+    // Flutter Color → 0~1 RGB
+    final paletteRed =
+        paletteColor.r.toDouble() / 255.0;
 
-  switch (_filterMode) {
-    case '鮮明':
-      filterColor = Colors.orange;
-      filterOpacity = 0.70;
-      break;
+    final paletteGreen =
+        paletteColor.g.toDouble() / 255.0;
 
-    case '溫暖':
-      filterColor = Colors.amber;
-      filterOpacity = 0.22;
-      break;
+    final paletteBlue =
+        paletteColor.b.toDouble() / 255.0;
 
-    case '冷色':
-      filterColor = Colors.blue;
-      filterOpacity = 0.20;
-      break;
-
-    case '復古':
-      filterColor = Colors.brown;
-      filterOpacity = 0.22;
-      break;
-
-    default:
-      break;
-  }
-
- if (filterColor != null && filterOpacity > 0) {
-  processed = _applyColorOverlay(
-    processed,
-    filterColor,
-    filterOpacity,
-  );
-
-  _showEffectDebug(
-    '④-3 Filter 已套用\n'
-    '$_filterMode\n'
-    '強度：$filterOpacity',
-  );
-} else {
-  _showEffectDebug('④-3 Filter：原味，未套用');
-}
-  // ====================================================
-  // 2. 調色盤
-  // ====================================================
- if (_selectedPalette != '原味') {
-  final paletteColor = _paletteColor(_selectedPalette);
-
-  final paletteOpacity =
-      (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12))
-          .clamp(0.04, 0.21);
-
-  processed = _applyColorOverlay(
-    processed,
-    paletteColor,
-    paletteOpacity,
-  );
-
-  _showEffectDebug(
-    '④-4 Palette 已套用\n'
-    '$_selectedPalette\n'
-    '強度：$paletteOpacity',
-  );
-} else {
-  _showEffectDebug('④-4 Palette：原味，未套用');
-}
-  // ====================================================
-  // 3. 曝光
-  // 與預覽的白/黑 Overlay 邏輯一致
-  // ====================================================
-  final exposureOpacity =
-      (_exposureValue.abs() * 0.12).clamp(0.0, 0.24);
-
-  if (exposureOpacity > 0) {
-    final exposureColor = _exposureValue >= 0
-        ? Colors.white
-        : Colors.black;
-
-    processed = _applyColorOverlay(
-      processed,
-      exposureColor,
-      exposureOpacity,
+    _showEffectDebug(
+      '④-2 準備原生 Core Image\n'
+      'Filter：$_filterMode\n'
+      'Palette：$_selectedPalette\n'
+      'Palette RGB：'
+      '${paletteRed.toStringAsFixed(2)}, '
+      '${paletteGreen.toStringAsFixed(2)}, '
+      '${paletteBlue.toStringAsFixed(2)}\n'
+      'Palette 強度：'
+      '${paletteOpacity.toStringAsFixed(2)}\n'
+      'Exposure：$_exposureValue\n'
+      'Night：$_nightMode',
     );
-  }
 
-  // ====================================================
-  // 4. 夜景
-  // 與預覽的 Indigo Overlay 邏輯一致
-  // ====================================================
-  if (_nightMode) {
-    processed = _applyColorOverlay(
-      processed,
-      Colors.indigo,
-      0.16,
+    // ====================================================
+    // 2. 呼叫 iOS 原生 Core Image
+    // ====================================================
+
+    final processedPath =
+        await _cameraAdapter.applyPhotoEffects(
+      sourcePath: sourcePath,
+
+      filter: _filterMode,
+
+      paletteRed: paletteRed,
+      paletteGreen: paletteGreen,
+      paletteBlue: paletteBlue,
+      paletteOpacity: paletteOpacity,
+
+      exposure: _exposureValue.toDouble(),
+
+      nightMode: _nightMode,
     );
+
+    // ====================================================
+    // 3. 檢查 native 是否成功回傳
+    // ====================================================
+
+    if (processedPath == null ||
+        processedPath.isEmpty) {
+      throw Exception(
+        'iOS Core Image 沒有回傳處理後照片路徑',
+      );
+    }
+
+    final outputFile = File(processedPath);
+
+    final exists = await outputFile.exists();
+
+    if (!exists) {
+      throw Exception(
+        'iOS Core Image 輸出的照片不存在\n'
+        '$processedPath',
+      );
+    }
+
+    final size = await outputFile.length();
+
+    if (size <= 0) {
+      throw Exception(
+        'iOS Core Image 輸出的照片大小為 0',
+      );
+    }
+
+    // ====================================================
+    // 4. 完成
+    // ====================================================
+
+    _showEffectDebug(
+      '④-3 原生特效處理完成\n'
+      'Filter：$_filterMode\n'
+      'Palette：$_selectedPalette\n'
+      'Exposure：$_exposureValue\n'
+      'Night：$_nightMode',
+    );
+
+    _showEffectDebug(
+      '④-4 已取得原生處理照片\n'
+      '檔案：OK\n'
+      '大小：$size bytes',
+    );
+
+    _showEffectDebug(
+      '④-5 特效照片已輸出\n'
+      'Filter：$_filterMode\n'
+      'Palette：$_selectedPalette\n'
+      'Exposure：$_exposureValue\n'
+      'Night：$_nightMode\n'
+      '檔案：OK\n'
+      '大小：$size bytes',
+    );
+
+    return processedPath;
+  } catch (error, stackTrace) {
+    debugPrint(
+      '❌ Native photo effect failed: $error',
+    );
+
+    debugPrint(
+      '$stackTrace',
+    );
+
+    _showEffectDebug(
+      '❌ 原生特效處理失敗\n'
+      '$error',
+    );
+
+    rethrow;
   }
-
-  // ====================================================
-  // 5. 輸出處理後照片
-  // ====================================================
-  final directory = sourceFile.parent;
-
-  final outputPath =
-      '${directory.path}${Platform.pathSeparator}'
-      'processed_${DateTime.now().microsecondsSinceEpoch}.jpg';
-
-  await File(outputPath).writeAsBytes(
-    img.encodeJpg(
-      processed,
-      quality: 95,
-    ),
-    flush:true,
-  );
-  final outputFile = File(outputPath);
-
-final exists = await outputFile.exists();
-final size = exists ? await outputFile.length() : 0;
-
-_showEffectDebug(
-  '④-5 特效照片已輸出\n'
-  'Filter：$_filterMode\n'
-  'Palette：$_selectedPalette\n'
-  'Exposure：$_exposureValue\n'
-  'Night：$_nightMode\n'
-  '檔案：${exists ? "OK" : "FAIL"}\n'
-  '大小：$size bytes',
-);
-_showEffectDebug(
-  '④-5 特效照片已輸出\n'
-  'processed_*.jpg',
-);
-  return outputPath;
 }
+
 void _showEffectDebug(String message) {
   if (!mounted) return;
 

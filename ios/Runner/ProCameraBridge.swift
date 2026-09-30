@@ -111,6 +111,82 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
           }
         }
 
+     case "applyPhotoEffects":
+
+    guard let args = call.arguments as? [String: Any],
+          let sourcePath = args["sourcePath"] as? String,
+          let filter = args["filter"] as? String
+    else {
+        result(
+            FlutterError(
+                code: "INVALID_ARGUMENT",
+                message: "照片特效參數無效",
+                details: nil
+            )
+        )
+        return
+    }
+
+    let paletteRed =
+        (args["paletteRed"] as? NSNumber)?.doubleValue ?? 0.0
+
+    let paletteGreen =
+        (args["paletteGreen"] as? NSNumber)?.doubleValue ?? 0.0
+
+    let paletteBlue =
+        (args["paletteBlue"] as? NSNumber)?.doubleValue ?? 0.0
+
+    let paletteOpacity =
+        (args["paletteOpacity"] as? NSNumber)?.doubleValue ?? 0.0
+
+    let exposure =
+        (args["exposure"] as? NSNumber)?.doubleValue ?? 0.0
+
+    let nightMode =
+        (args["nightMode"] as? NSNumber)?.boolValue ?? false
+
+    do {
+        let processedPath =
+            try cameraManager.applyPhotoEffects(
+                sourcePath: sourcePath,
+                filter: filter,
+                paletteRed: paletteRed,
+                paletteGreen: paletteGreen,
+                paletteBlue: paletteBlue,
+                paletteOpacity: paletteOpacity,
+                exposure: exposure,
+                nightMode: nightMode
+            )
+
+        DispatchQueue.main.async {
+            result(processedPath)
+        }
+
+    } catch let error as CameraManagerError {
+
+        DispatchQueue.main.async {
+            result(
+                FlutterError(
+                    code: error.code,
+                    message: error.message,
+                    details: nil
+                )
+            )
+        }
+
+    } catch {
+
+        DispatchQueue.main.async {
+            result(
+                FlutterError(
+                    code: "PHOTO_EFFECT_ERROR",
+                    message: error.localizedDescription,
+                    details: nil
+                )
+            )
+        }
+    }
+     
      case "captureLivePhoto":
 
     Task {
