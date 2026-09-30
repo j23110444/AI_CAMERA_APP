@@ -398,6 +398,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
 
   
 Future<void> _loadSavedImageLists() async {
+  
   final prefs = await SharedPreferences.getInstance();
 
   final captured =
@@ -1449,6 +1450,14 @@ Future<void> _capturePhoto() async {
       _livePhotoAssetIdentifiers,
     ),
   );
+
+  await prefs.setString(
+    'live_photo_original_photos',
+    jsonEncode(
+      _livePhotoOriginalPhotos,
+    ),
+  );
+
 }
 
 Future<void> _deleteLivePhotoResources(
