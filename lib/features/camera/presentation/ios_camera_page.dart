@@ -1004,61 +1004,97 @@ void _showEffectDebug(String message) {
   });
 
   debugPrint('🎨 EFFECT DEBUG: $message');
-
-
-  Future.delayed(const Duration(seconds: 2), () {
-    if (!mounted) return;
-
-    // 只有目前還是這個訊息時才清除
-    if (_effectDebugMessage == message) {
-      setState(() {
-        _effectDebugMessage = '';
-      });
-    }
-  });
 }
 Future<void> _capturePhoto() async {
   try {
-    _showEffectDebug('① 開始拍照');
+    String effectFlow = '① 開始拍照';
+
+    _showEffectDebug(effectFlow);
+    await Future<void>.delayed(
+      const Duration(milliseconds: 150),
+    );
 
     final liveCapture = _livePhotoEnabled
         ? await _cameraAdapter.captureLivePhoto()
         : null;
 
-    _showEffectDebug('② 已取得拍照結果');
+    effectFlow += '\n② 已取得拍照結果';
+    _showEffectDebug(effectFlow);
+    await Future<void>.delayed(
+      const Duration(milliseconds: 150),
+    );
 
     final originalPath =
         liveCapture?.photoPath ??
         await _cameraAdapter.capturePhoto();
 
-    _showEffectDebug('③ 原始照片取得');
+    effectFlow += '\n③ 原始照片取得';
+    _showEffectDebug(effectFlow);
+    await Future<void>.delayed(
+      const Duration(milliseconds: 150),
+    );
 
     // ====================================================
-    // 照片特效處理
+    // 原始照片檢查
     // ====================================================
     debugPrint('📸 [1] 原始照片：$originalPath');
 
-    if (!await File(originalPath).exists()) {
+    final originalFile = File(originalPath);
+
+    if (!await originalFile.exists()) {
       debugPrint('❌ [1] 原始照片不存在');
       throw Exception('原始照片不存在');
     }
 
-    final path = await _applyPhotoEffects(originalPath);
+    debugPrint(
+      '📸 [1] 原始照片大小：'
+      '${await originalFile.length()} bytes',
+    );
+
+    // ====================================================
+    // 套用照片特效
+    // ====================================================
+    effectFlow += '\n④ 開始套用特效';
+    _showEffectDebug(effectFlow);
+
+    final path = await _applyPhotoEffects(
+      originalPath,
+    );
 
     debugPrint('📸 [2] 特效照片：$path');
 
-    if (!await File(path).exists()) {
+    final processedFile = File(path);
+
+    if (!await processedFile.exists()) {
       debugPrint('❌ [2] 特效照片不存在');
       throw Exception('特效照片不存在');
     }
 
+    final processedSize =
+        await processedFile.length();
+
     debugPrint(
-      '📸 [3] 特效照片大小：${await File(path).length()} bytes',
+      '📸 [3] 特效照片大小：'
+      '$processedSize bytes',
     );
+
+    effectFlow +=
+        '\n⑤ 特效處理完成'
+        '\nFilter：$_filterMode'
+        '\nPalette：$_selectedPalette'
+        '\nExposure：$_exposureValue'
+        '\nNight：$_nightMode';
+
+    _showEffectDebug(effectFlow);
+
+    await Future<void>.delayed(
+      const Duration(milliseconds: 300),
+    );
+
     String? processedVideoPath;
 
     // ====================================================
-    // 原況照片：影片也套用相同效果
+    // Live Photo 影片
     // ====================================================
     if (liveCapture != null) {
       try {
@@ -1072,19 +1108,29 @@ Future<void> _capturePhoto() async {
         );
         debugPrint('$stackTrace');
 
-        // 影片處理失敗時，先保留原始 Live Photo 影片
-        processedVideoPath = liveCapture.videoPath;
+        processedVideoPath =
+            liveCapture.videoPath;
       }
     }
 
     if (!mounted) return;
-    _showEffectDebug('⑥ 準備加入 AI 精選預覽');
+
+    effectFlow +=
+        '\n⑥ 準備加入 AI 精選預覽';
+
+    _showEffectDebug(effectFlow);
+
+    await Future<void>.delayed(
+      const Duration(milliseconds: 150),
+    );
+
     setState(() {
       _capturedImages.add(path);
 
       if (liveCapture != null &&
           processedVideoPath != null) {
-        _livePhotoVideos[path] = processedVideoPath;
+        _livePhotoVideos[path] =
+            processedVideoPath;
 
         _livePhotoAssetIdentifiers[path] =
             liveCapture.assetIdentifier;
@@ -1094,13 +1140,20 @@ Future<void> _capturePhoto() async {
       _captureAnimation = true;
     });
 
-    _showEffectDebug('⑦ 已加入特效照片');
+    effectFlow += '\n⑦ 已加入特效照片';
 
-    Timer(const Duration(milliseconds: 550), () {
-      if (mounted) {
-        setState(() => _captureAnimation = false);
-      }
-    });
+    _showEffectDebug(effectFlow);
+
+    Timer(
+      const Duration(milliseconds: 550),
+      () {
+        if (mounted) {
+          setState(
+            () => _captureAnimation = false,
+          );
+        }
+      },
+    );
 
     await _persistImageLists();
 
@@ -1111,7 +1164,13 @@ Future<void> _capturePhoto() async {
 
     if (!mounted) return;
 
-    setState(() => _isCapturing = false);
+    setState(
+      () => _isCapturing = false,
+    );
+
+    _showEffectDebug(
+      '❌ 拍照流程失敗\n$error',
+    );
 
     _showAiTip('⚠️ 拍攝失敗：$error');
   }
