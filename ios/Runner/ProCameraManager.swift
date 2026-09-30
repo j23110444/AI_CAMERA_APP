@@ -2126,7 +2126,32 @@ private final class LivePhotoCaptureDelegate:
 
       return
     }
+    
+      if let source =
+          CGImageSourceCreateWithData(
+              data as CFData,
+              nil
+          ),
+          let metadata =
+              CGImageSourceCopyPropertiesAtIndex(
+                  source,
+                  0,
+                  nil
+              ) as? [CFString: Any] {
 
+          if let makerNote =
+              metadata[kCGImagePropertyMakerAppleDictionary] as? [CFString: Any],
+            let identifier =
+              makerNote[kCGImagePropertyMakerAppleAssetIdentifier] as? String {
+
+              assetIdentifier = identifier
+
+              print(
+                  "Live Photo assetIdentifier:",
+                  identifier
+              )
+          }
+      }
     do {
 
       try data.write(

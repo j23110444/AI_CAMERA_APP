@@ -1712,9 +1712,6 @@ bool _isLivePhoto(String photoPath) {
       return;
     }
 
-    var selectedPosition =
-        Duration.zero;
-
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black87,
@@ -1736,13 +1733,25 @@ bool _isLivePhoto(String photoPath) {
                   // 原況影片
                   // ------------------------------------------------
 
-                  AspectRatio(
-                    aspectRatio:
-                        controller
-                            .value
-                            .aspectRatio,
-                    child: vp.VideoPlayer(
-                      controller,
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+
+                    onLongPressStart: (_) async {
+                      await controller.seekTo(Duration.zero);
+                      await controller.play();
+                    },
+
+                    onLongPressEnd: (_) async {
+                      await controller.pause();
+
+                      if (dialogContext.mounted) {
+                        Navigator.of(dialogContext).pop();
+                      }
+                    },
+
+                    child: AspectRatio(
+                      aspectRatio: controller.value.aspectRatio,
+                      child: vp.VideoPlayer(controller),
                     ),
                   ),
 
@@ -1786,47 +1795,7 @@ bool _isLivePhoto(String photoPath) {
                     ),
                   ),
 
-                  // ------------------------------------------------
-                  // 原況時間軸
-                  // ------------------------------------------------
-
-                  Slider(
-                    value: selectedPosition
-                        .inMilliseconds
-                        .toDouble(),
-                    min: 0,
-                    max: (controller
-                            .value
-                            .duration
-                            .inMilliseconds)
-                        .clamp(
-                          1,
-                          60000,
-                        )
-                        .toDouble(),
-                    activeColor:
-                        Colors.yellowAccent,
-                    onChanged: (
-                      value,
-                    ) async {
-                      selectedPosition =
-                          Duration(
-                        milliseconds:
-                            value.round(),
-                      );
-
-                      await controller
-                          .seekTo(
-                        selectedPosition,
-                      );
-
-                      if (context.mounted) {
-                        setDialogState(
-                          () {},
-                        );
-                      }
-                    },
-                  ),
+                 
                 ],
               ),
             );
