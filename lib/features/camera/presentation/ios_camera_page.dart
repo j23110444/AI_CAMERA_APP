@@ -890,31 +890,45 @@ _showEffectDebug(
       break;
   }
 
-  if (filterColor != null && filterOpacity > 0) {
-    processed = _applyColorOverlay(
-      processed,
-      filterColor,
-      filterOpacity,
-    );
-  }
-_showEffectDebug('④-3 Filter 套用完成');
+ if (filterColor != null && filterOpacity > 0) {
+  processed = _applyColorOverlay(
+    processed,
+    filterColor,
+    filterOpacity,
+  );
+
+  _showEffectDebug(
+    '④-3 Filter 已套用\n'
+    '$_filterMode\n'
+    '強度：$filterOpacity',
+  );
+} else {
+  _showEffectDebug('④-3 Filter：原味，未套用');
+}
   // ====================================================
   // 2. 調色盤
   // ====================================================
-  if (_selectedPalette != '原味') {
-    final paletteColor = _paletteColor(_selectedPalette);
+ if (_selectedPalette != '原味') {
+  final paletteColor = _paletteColor(_selectedPalette);
 
-    final paletteOpacity =
-        (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12))
-            .clamp(0.04, 0.21);
+  final paletteOpacity =
+      (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12))
+          .clamp(0.04, 0.21);
 
-    processed = _applyColorOverlay(
-      processed,
-      paletteColor,
-      paletteOpacity,
-    );
-  }
-_showEffectDebug('④-4 Palette 套用完成');
+  processed = _applyColorOverlay(
+    processed,
+    paletteColor,
+    paletteOpacity,
+  );
+
+  _showEffectDebug(
+    '④-4 Palette 已套用\n'
+    '$_selectedPalette\n'
+    '強度：$paletteOpacity',
+  );
+} else {
+  _showEffectDebug('④-4 Palette：原味，未套用');
+}
   // ====================================================
   // 3. 曝光
   // 與預覽的白/黑 Overlay 邏輯一致
@@ -962,6 +976,20 @@ _showEffectDebug('④-4 Palette 套用完成');
     ),
     flush:true,
   );
+  final outputFile = File(outputPath);
+
+final exists = await outputFile.exists();
+final size = exists ? await outputFile.length() : 0;
+
+_showEffectDebug(
+  '④-5 特效照片已輸出\n'
+  'Filter：$_filterMode\n'
+  'Palette：$_selectedPalette\n'
+  'Exposure：$_exposureValue\n'
+  'Night：$_nightMode\n'
+  '檔案：${exists ? "OK" : "FAIL"}\n'
+  '大小：$size bytes',
+);
 _showEffectDebug(
   '④-5 特效照片已輸出\n'
   'processed_*.jpg',
@@ -976,6 +1004,18 @@ void _showEffectDebug(String message) {
   });
 
   debugPrint('🎨 EFFECT DEBUG: $message');
+
+
+  Future.delayed(const Duration(seconds: 2), () {
+    if (!mounted) return;
+
+    // 只有目前還是這個訊息時才清除
+    if (_effectDebugMessage == message) {
+      setState(() {
+        _effectDebugMessage = '';
+      });
+    }
+  });
 }
 Future<void> _capturePhoto() async {
   try {
@@ -1041,18 +1081,20 @@ Future<void> _capturePhoto() async {
     _showEffectDebug('⑥ 準備加入 AI 精選預覽');
     setState(() {
       _capturedImages.add(path);
-    _showEffectDebug('⑦ 已加入特效照片');
-      if (liveCapture != null &&
-            processedVideoPath != null) {
-          _livePhotoVideos[path] = processedVideoPath;
 
-          _livePhotoAssetIdentifiers[path] =
-              liveCapture.assetIdentifier;
-        }
+      if (liveCapture != null &&
+          processedVideoPath != null) {
+        _livePhotoVideos[path] = processedVideoPath;
+
+        _livePhotoAssetIdentifiers[path] =
+            liveCapture.assetIdentifier;
+      }
 
       _isCapturing = false;
       _captureAnimation = true;
     });
+
+    _showEffectDebug('⑦ 已加入特效照片');
 
     Timer(const Duration(milliseconds: 550), () {
       if (mounted) {
