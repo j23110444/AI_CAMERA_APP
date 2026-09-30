@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -395,44 +396,137 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     }
   }
 
-  Future<void> _loadSavedImageLists() async {
-    final prefs = await SharedPreferences.getInstance();
+  
+Future<void> _loadSavedImageLists() async {
+  final prefs = await SharedPreferences.getInstance();
 
-    final captured = prefs.getStringList('captured_images') ?? [];
+  final captured =
+      prefs.getStringList('captured_images') ?? [];
 
-    final saved = prefs.getStringList('saved_images') ?? [];
+  final saved =
+      prefs.getStringList('saved_images') ?? [];
 
-    final validCaptured = <String>[];
-    final validSaved = <String>[];
+  final validCaptured = <String>[];
+  final validSaved = <String>[];
 
-    for (final path in captured) {
-      if (await File(path).exists()) {
-        validCaptured.add(path);
-      }
+  for (final path in captured) {
+    if (await File(path).exists()) {
+      validCaptured.add(path);
     }
-
-    for (final path in saved) {
-      if (await File(path).exists()) {
-        validSaved.add(path);
-      }
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      _capturedImages
-        ..clear()
-        ..addAll(validCaptured);
-
-      _savedImages
-        ..clear()
-        ..addAll(validSaved);
-    });
-
-    await prefs.setStringList('captured_images', validCaptured);
-
-    await prefs.setStringList('saved_images', validSaved);
   }
+
+  for (final path in saved) {
+    if (await File(path).exists()) {
+      validSaved.add(path);
+    }
+  }
+
+  // ------------------------------------------------------------
+  // 還原 Live Photo 的 Photo ↔ MOV 關聯
+  // ------------------------------------------------------------
+
+  final livePhotoVideos = <String, String>{};
+
+  final livePhotoAssetIdentifiers =
+      <String, String>{};
+
+  final storedVideosJson =
+      prefs.getString('live_photo_videos');
+
+  final storedAssetsJson =
+      prefs.getString(
+        'live_photo_asset_identifiers',
+      );
+
+  if (storedVideosJson != null) {
+    try {
+      final decoded = jsonDecode(
+        storedVideosJson,
+      );
+
+      if (decoded is Map) {
+        decoded.forEach((key, value) {
+          if (key is String && value is String) {
+            livePhotoVideos[key] = value;
+          }
+        });
+      }
+    } catch (error) {
+      debugPrint(
+        '⚠️ Live Photo MOV 關聯資料讀取失敗：$error',
+      );
+    }
+  }
+
+  if (storedAssetsJson != null) {
+    try {
+      final decoded = jsonDecode(
+        storedAssetsJson,
+      );
+
+      if (decoded is Map) {
+        decoded.forEach((key, value) {
+          if (key is String && value is String) {
+            livePhotoAssetIdentifiers[key] =
+                value;
+          }
+        });
+      }
+    } catch (error) {
+      debugPrint(
+        '⚠️ Live Photo assetIdentifier '
+        '讀取失敗：$error',
+      );
+    }
+  }
+
+  // ------------------------------------------------------------
+  // 只保留：
+  // 1. Photo 還存在
+  // 2. MOV 還存在
+  // ------------------------------------------------------------
+
+  final validPhotoPaths = {
+    ...validCaptured,
+    ...validSaved,
+  };
+
+  livePhotoVideos.removeWhere(
+    (photoPath, videoPath) =>
+        !validPhotoPaths.contains(photoPath) ||
+        !File(videoPath).existsSync(),
+  );
+
+  livePhotoAssetIdentifiers.removeWhere(
+    (photoPath, assetIdentifier) =>
+        !livePhotoVideos.containsKey(photoPath),
+  );
+
+  if (!mounted) return;
+
+  setState(() {
+    _capturedImages
+      ..clear()
+      ..addAll(validCaptured);
+
+    _savedImages
+      ..clear()
+      ..addAll(validSaved);
+
+    _livePhotoVideos
+      ..clear()
+      ..addAll(livePhotoVideos);
+
+    _livePhotoAssetIdentifiers
+      ..clear()
+      ..addAll(
+        livePhotoAssetIdentifiers,
+      );
+  });
+
+  // 同步清理已經不存在的 Live Photo 關聯
+  await _persistImageLists();
+}
 
   @override
   void dispose() {
@@ -1469,15 +1563,76 @@ Future<void> _capturePhoto() async {
   }
 
   Future<void> _persistImageLists() async {
-    final prefs = await SharedPreferences.getInstance();
+  final prefs =
+      await SharedPreferences.getInstance();
 
-    await prefs.setStringList(
-      'captured_images',
-      List<String>.from(_capturedImages),
-    );
+  await prefs.setStringList(
+    'captured_images',
+    List<String>.from(
+      _capturedImages,
+    ),
+  );
 
-    await prefs.setStringList('saved_images', List<String>.from(_savedImages));
+  await prefs.setStringList(
+    'saved_images',
+    List<String>.from(
+      _savedImages,
+    ),
+  );
+
+  // ------------------------------------------------------------
+  // Live Photo Photo ↔ MOV 關聯
+  // ------------------------------------------------------------
+
+  await prefs.setString(
+    'live_photo_videos',
+    jsonEncode(
+      _livePhotoVideos,
+    ),
+  );
+
+  await prefs.setString(
+    'live_photo_asset_identifiers',
+    jsonEncode(
+      _livePhotoAssetIdentifiers,
+    ),
+  );
+}
+
+Future<void> _deleteLivePhotoResources(
+  String photoPath,
+) async {
+  final videoPath =
+      _livePhotoVideos.remove(
+    photoPath,
+  );
+
+  _livePhotoAssetIdentifiers.remove(
+    photoPath,
+  );
+
+  if (videoPath == null) {
+    return;
   }
+
+  try {
+    final videoFile =
+        File(videoPath);
+
+    if (await videoFile.exists()) {
+      await videoFile.delete();
+
+      debugPrint(
+        '🗑️ Deleted Live Photo MOV: '
+        '$videoPath',
+      );
+    }
+  } catch (error) {
+    debugPrint(
+      '⚠️ Live Photo MOV 刪除失敗：$error',
+    );
+  }
+}
 
 Future<bool> _saveImageToApplePhotos(String sourcePath) async {
   final file = File(sourcePath);
@@ -1616,124 +1771,178 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
   }
 }
 
-  Future<void> _showLivePhotoPreview(String photoPath) async {
-    final videoPath = _livePhotoVideos[photoPath];
-    if (videoPath == null || !await File(videoPath).exists()) {
-      _showEnlargedGallery(_capturedImages.indexOf(photoPath));
-      return;
+  Future<void> _showLivePhotoPreview(
+  String photoPath, {
+  bool showSavedImages = false,
+}) async {
+  final videoPath =
+      _livePhotoVideos[photoPath];
+
+  // ------------------------------------------------------------
+  // 找不到 MOV
+  // → 回到一般照片檢視
+  // ------------------------------------------------------------
+
+  if (videoPath == null ||
+      !await File(videoPath).exists()) {
+    final galleryImages = showSavedImages
+        ? _savedImages
+        : _capturedImages;
+
+    final index =
+        galleryImages.indexOf(photoPath);
+
+    if (index >= 0) {
+      _showEnlargedGallery(
+        index,
+        showSavedImages:
+            showSavedImages,
+      );
     }
 
-    final controller = vp.VideoPlayerController.file(File(videoPath));
+    return;
+  }
+
+  final controller =
+      vp.VideoPlayerController.file(
+    File(videoPath),
+  );
+
+  try {
     await controller.initialize();
     await controller.setLooping(true);
     await controller.play();
+
     if (!mounted) {
-      await controller.dispose();
       return;
     }
 
-    var selectedPosition = Duration.zero;
+    var selectedPosition =
+        Duration.zero;
+
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black87,
       builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (context, setDialogState) => Dialog(
-            backgroundColor: Colors.black,
-            insetPadding: const EdgeInsets.all(18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AspectRatio(
-                  aspectRatio: controller.value.aspectRatio,
-                  child: vp.VideoPlayer(controller),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          '原況預覽',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
+          builder: (
+            context,
+            setDialogState,
+          ) {
+            return Dialog(
+              backgroundColor: Colors.black,
+              insetPadding:
+                  const EdgeInsets.all(18),
+              child: Column(
+                mainAxisSize:
+                    MainAxisSize.min,
+                children: [
+                  // ------------------------------------------------
+                  // 原況影片
+                  // ------------------------------------------------
+
+                  AspectRatio(
+                    aspectRatio:
+                        controller
+                            .value
+                            .aspectRatio,
+                    child: vp.VideoPlayer(
+                      controller,
+                    ),
+                  ),
+
+                  Padding(
+                    padding:
+                        const EdgeInsets.fromLTRB(
+                      14,
+                      10,
+                      14,
+                      14,
+                    ),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '原況照片',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight:
+                                  FontWeight.bold,
+                            ),
                           ),
                         ),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          final framePath = await _extractLivePhotoFrame(
-                            videoPath,
-                            selectedPosition,
-                          );
-                          if (framePath == null || !mounted) return;
-                          final index = _capturedImages.indexOf(photoPath);
-                          if (index >= 0) {
-                            setState(() {
-                              _capturedImages[index] = framePath;
-                              _livePhotoVideos[framePath] = videoPath;
-                              _livePhotoVideos.remove(photoPath);
-                            });
-                            await _persistImageLists();
-                          }
-                          if (dialogContext.mounted) {
-                            Navigator.pop(dialogContext);
-                          }
-                          _showAiTip('✅ 已選擇原況中的這個瞬間');
-                        },
-                        child: const Text('選擇瞬間'),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(dialogContext),
-                        icon: const Icon(Icons.close, color: Colors.white),
-                      ),
-                    ],
+
+                        // ------------------------------------------------
+                        // 關閉
+                        // ------------------------------------------------
+
+                        IconButton(
+                          onPressed: () {
+                            Navigator.pop(
+                              dialogContext,
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                Slider(
-                  value: selectedPosition.inMilliseconds.toDouble(),
-                  min: 0,
-                  max: (controller.value.duration.inMilliseconds)
-                      .clamp(1, 60000)
-                      .toDouble(),
-                  activeColor: Colors.yellowAccent,
-                  onChanged: (value) async {
-                    selectedPosition = Duration(milliseconds: value.round());
-                    await controller.seekTo(selectedPosition);
-                    if (context.mounted) setDialogState(() {});
-                  },
-                ),
-              ],
-            ),
-          ),
+
+                  // ------------------------------------------------
+                  // 原況時間軸
+                  // ------------------------------------------------
+
+                  Slider(
+                    value: selectedPosition
+                        .inMilliseconds
+                        .toDouble(),
+                    min: 0,
+                    max: (controller
+                            .value
+                            .duration
+                            .inMilliseconds)
+                        .clamp(
+                          1,
+                          60000,
+                        )
+                        .toDouble(),
+                    activeColor:
+                        Colors.yellowAccent,
+                    onChanged: (
+                      value,
+                    ) async {
+                      selectedPosition =
+                          Duration(
+                        milliseconds:
+                            value.round(),
+                      );
+
+                      await controller
+                          .seekTo(
+                        selectedPosition,
+                      );
+
+                      if (context.mounted) {
+                        setDialogState(
+                          () {},
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
+  } finally {
     await controller.dispose();
   }
-
-  Future<String?> _extractLivePhotoFrame(
-    String videoPath,
-    Duration position,
-  ) async {
-    final video = File(videoPath);
-    if (!await video.exists()) return null;
-    final output = File(
-      '${video.parent.path}${Platform.pathSeparator}'
-      'live_${DateTime.now().microsecondsSinceEpoch}.jpg',
-    );
-    final seconds = position.inMilliseconds / 1000;
-    final session = await FFmpegKit.execute(
-      '-ss $seconds -i "${video.path}" -frames:v 1 -q:v 2 "${output.path}"',
-    );
-    final code = await session.getReturnCode();
-    if (!ReturnCode.isSuccess(code) || !await output.exists()) {
-      _showAiTip('⚠️ 原況瞬間擷取失敗');
-      return null;
-    }
-    return output.path;
-  }
+}
 
   Future<void> _showImageEditor(String sourcePath) async {
     final sourceFile = File(sourcePath);
@@ -3242,30 +3451,53 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
   }
 
   Future<void> _clearAllImages() async {
-    final imagesToDelete = List<String>.from(_capturedImages);
+  final imagesToDelete =
+      List<String>.from(
+    _capturedImages,
+  );
 
-    for (final path in imagesToDelete) {
-      try {
-        final file = File(path);
+  for (final path in imagesToDelete) {
+    try {
+      // --------------------------------------------------------
+      // Live Photo → 先刪 MOV
+      // --------------------------------------------------------
 
-        if (await file.exists()) {
-          await file.delete();
-          debugPrint('🗑️ Deleted captured file: $path');
-        }
-      } catch (e) {
-        debugPrint('❌ Failed to delete file: $path');
-        debugPrint('$e');
+      await _deleteLivePhotoResources(
+        path,
+      );
+
+      // --------------------------------------------------------
+      // 再刪 Photo
+      // --------------------------------------------------------
+
+      final file =
+          File(path);
+
+      if (await file.exists()) {
+        await file.delete();
+
+        debugPrint(
+          '🗑️ Deleted captured file: '
+          '$path',
+        );
       }
+    } catch (e) {
+      debugPrint(
+        '❌ Failed to delete file: '
+        '$path',
+      );
+      debugPrint('$e');
     }
-
-    if (!mounted) return;
-
-    setState(() {
-      _capturedImages.clear();
-    });
-
-    await _persistImageLists();
   }
+
+  if (!mounted) return;
+
+  setState(() {
+    _capturedImages.clear();
+  });
+
+  await _persistImageLists();
+}
 
   void _showCircularOptionsDialog({
     required String title,
@@ -3771,16 +4003,21 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                   // ② 刪除
                   // ------------------------------------------------
                   if (showSavedImages) {
-                    // ==============================================
-                    // 永久相簿
-                    // 同時刪除實體 JPG
-                    // ==============================================
-                    try {
-                      final file = File(itemPath);
+                  // ==============================================
+                  // 永久相簿
+                  // 刪除 JPG + Live Photo MOV
+                  // ==============================================
+                  try {
+                    await _deleteLivePhotoResources(
+                      itemPath,
+                    );
 
-                      if (await file.exists()) {
-                        await file.delete();
-                      }
+                    final file =
+                        File(itemPath);
+
+                    if (await file.exists()) {
+                      await file.delete();
+                    }
                     } catch (e) {
                       debugPrint('❌ 永久相簿照片刪除失敗: $e');
 
@@ -3807,6 +4044,9 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                     // ==============================================
                     // AI 候選照片
                     // ==============================================
+                     await _deleteLivePhotoResources(
+                        itemPath,
+                      );
                     setState(() {
                       if (deletedIndex >= 0 &&
                           deletedIndex < _capturedImages.length) {
@@ -4748,11 +4988,43 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                     final imageFile = File(imagePath);
 
                     return GestureDetector(
+                      // -----------------------------------------------------------
+                      // 點擊
+                      //
+                      // 和普通照片一樣進入照片檢視
+                      // -----------------------------------------------------------
                       onTap: () {
-                        Navigator.pop(sheetContext);
+                        Navigator.pop(
+                          sheetContext,
+                        );
 
-                        _showEnlargedGallery(index, showSavedImages: true);
+                        _showEnlargedGallery(
+                          index,
+                          showSavedImages: true,
+                        );
                       },
+
+                      // -----------------------------------------------------------
+                      // 長按
+                      //
+                      // Live Photo → 播放原況
+                      // 普通照片 → 無動作
+                      // -----------------------------------------------------------
+                      onLongPress: () {
+                        if (_livePhotoVideos.containsKey(
+                          imagePath,
+                        )) {
+                          Navigator.pop(
+                            sheetContext,
+                          );
+
+                          _showLivePhotoPreview(
+                            imagePath,
+                            showSavedImages: true,
+                          );
+                        }
+                      },
+
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: imageFile.existsSync()
@@ -6185,16 +6457,31 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
 
                         if (!mounted) return;
 
-                        final file = File(itemPath);
+                        // ---------------------------------------------------------
+                        // 如果是 Live Photo
+                        // 先刪除對應 MOV + 關聯資料
+                        // ---------------------------------------------------------
+
+                        await _deleteLivePhotoResources(
+                          itemPath,
+                        );
+
+                        final file =
+                            File(itemPath);
 
                         setState(() {
                           if (index <
                               _capturedImages.length) {
-                            _capturedImages.removeAt(index);
+                            _capturedImages.removeAt(
+                              index,
+                            );
                           }
                         });
 
-                        // 刪除 captures 實體檔案
+                        // ---------------------------------------------------------
+                        // 刪除 Photo 實體檔案
+                        // ---------------------------------------------------------
+
                         try {
                           if (await file.exists()) {
                             await file.delete();
@@ -6222,26 +6509,35 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                       // 照片縮圖
                       // -----------------------------------------------------
                       child: GestureDetector(
-                        onTap: () {
-                          if (_livePhotoVideos
-                              .containsKey(itemPath)) {
-                            _showLivePhotoPreview(
-                              itemPath,
-                            );
-                          } else {
-                            _showEnlargedGallery(
-                              index,
-                            );
-                          }
-                        },
+                      // -----------------------------------------------------------
+                      // 點擊
+                      //
+                      // 所有照片都按照「普通照片」方式查看
+                      // Live Photo 不在點擊時直接播放
+                      // -----------------------------------------------------------
+                      onTap: () {
+                        _showEnlargedGallery(
+                          index,
+                        );
+                      },
 
-                        onLongPress: () {
-                          _showEnlargedGallery(
-                            index,
+                      // -----------------------------------------------------------
+                      // 長按
+                      //
+                      // 只有 Live Photo 才播放原況
+                      // 普通照片長按不做任何事情
+                      // -----------------------------------------------------------
+                      onLongPress: () {
+                        if (_livePhotoVideos.containsKey(
+                          itemPath,
+                        )) {
+                          _showLivePhotoPreview(
+                            itemPath,
                           );
-                        },
+                        }
+                      },
 
-                        child: Container(
+                      child: Container(
                           margin:
                               const EdgeInsets.only(
                             bottom: 10,
