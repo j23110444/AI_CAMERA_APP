@@ -2127,23 +2127,6 @@ private final class LivePhotoCaptureDelegate:
       return
     }
 
-      if let source =
-          CGImageSourceCreateWithData(
-              data as CFData,
-              nil
-          ),
-          let metadata =
-              CGImageSourceCopyPropertiesAtIndex(
-                  source,
-                  0,
-                  nil
-              ) as? [CFString: Any] {
-              print(
-                  "Live Photo assetIdentifier:",
-                  identifier
-              )
-          }
-      }
     do {
 
       try data.write(
@@ -2168,43 +2151,55 @@ private final class LivePhotoCaptureDelegate:
   // Live Photo Movie
   // ------------------------------------------------------------
 
-    func photoOutput(
-      _ output: AVCapturePhotoOutput,
-      didFinishProcessingPhoto photo: AVCapturePhoto,
-      error: Error?
-    ) {
-      if let error = error {
-        finish(throwing: error)
-        return
-      }
+  func photoOutput(
+    _ output: AVCapturePhotoOutput,
+    didFinishProcessingLivePhotoToMovieFileAt fileURL: URL,
+    duration: CMTime,
+    photoDisplayTime: CMTime,
+    resolvedSettings: AVCaptureResolvedPhotoSettings,
+    error: Error?
+  ) {
 
-      guard let data =
-        photo.fileDataRepresentation()
-      else {
-        finish(
-          throwing:
-            CameraManagerError.unsupported(
-              "無法取得 Live Photo 照片資料"
-            )
-        )
-        return
-      }
+    if let error = error {
 
-      do {
-        try data.write(
-          to: photoURL,
-          options: .atomic
-        )
+      finish(
+        throwing: error
+      )
 
-        photoPath =
-          photoURL.path
-
-        tryFinish()
-
-      } catch {
-        finish(throwing: error)
-      }
+      return
     }
+
+    do {
+
+      if fileURL != movieURL {
+
+        if FileManager.default.fileExists(
+          atPath: movieURL.path
+        ) {
+
+          try FileManager.default.removeItem(
+            at: movieURL
+          )
+        }
+
+        try FileManager.default.moveItem(
+          at: fileURL,
+          to: movieURL
+        )
+      }
+
+      moviePath =
+        movieURL.path
+
+      tryFinish()
+
+    } catch {
+
+      finish(
+        throwing: error
+      )
+    }
+  }
 
   // ------------------------------------------------------------
   // Finish
