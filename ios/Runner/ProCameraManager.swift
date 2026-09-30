@@ -2168,55 +2168,43 @@ private final class LivePhotoCaptureDelegate:
   // Live Photo Movie
   // ------------------------------------------------------------
 
-  func photoOutput(
-    _ output: AVCapturePhotoOutput,
-    didFinishProcessingLivePhotoToMovieFileAt fileURL: URL,
-    duration: CMTime,
-    photoDisplayTime: CMTime,
-    resolvedSettings: AVCaptureResolvedPhotoSettings,
-    error: Error?
-  ) {
-
-    if let error = error {
-
-      finish(
-        throwing: error
-      )
-
-      return
-    }
-
-    do {
-
-      if fileURL != movieURL {
-
-        if FileManager.default.fileExists(
-          atPath: movieURL.path
-        ) {
-
-          try FileManager.default.removeItem(
-            at: movieURL
-          )
-        }
-
-        try FileManager.default.moveItem(
-          at: fileURL,
-          to: movieURL
-        )
+    func photoOutput(
+      _ output: AVCapturePhotoOutput,
+      didFinishProcessingPhoto photo: AVCapturePhoto,
+      error: Error?
+    ) {
+      if let error = error {
+        finish(throwing: error)
+        return
       }
 
-      moviePath =
-        movieURL.path
+      guard let data =
+        photo.fileDataRepresentation()
+      else {
+        finish(
+          throwing:
+            CameraManagerError.unsupported(
+              "無法取得 Live Photo 照片資料"
+            )
+        )
+        return
+      }
 
-      tryFinish()
+      do {
+        try data.write(
+          to: photoURL,
+          options: .atomic
+        )
 
-    } catch {
+        photoPath =
+          photoURL.path
 
-      finish(
-        throwing: error
-      )
+        tryFinish()
+
+      } catch {
+        finish(throwing: error)
+      }
     }
-  }
 
   // ------------------------------------------------------------
   // Finish
