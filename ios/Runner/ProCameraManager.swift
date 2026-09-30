@@ -1120,7 +1120,7 @@ private func applyColorOverlay(
       PHPhotoLibrary.shared().performChanges({
 
         let creationRequest =
-          PHAssetCreationRequest()
+          PHAssetCreationRequest.forAsset()
 
         creationRequest.addResource(
           with: .photo,

@@ -4882,40 +4882,39 @@ bool _isLivePhoto(String photoPath) {
                     final imagePath = _savedImages[index];
                     final imageFile = File(imagePath);
 
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
+                   return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
 
-                      // -----------------------------------------------------------
-                      // 點擊
-                      // 一般照片 / Live Photo 都按照普通照片查看
-                      // -----------------------------------------------------------
-                      onTap: () {
-                        Navigator.pop(sheetContext);
+                    onTap: () {
+                      Navigator.pop(sheetContext);
 
-                        _showEnlargedGallery(
-                          index,
-                          showSavedImages: true,
+                      _showEnlargedGallery(
+                        index,
+                        showSavedImages: true,
+                      );
+                    },
+
+                    onLongPressStart: (_) {
+                      debugPrint(
+                        'LONG PRESS START APP ALBUM: $imagePath',
+                      );
+
+                      if (!_isLivePhoto(imagePath)) {
+                        _showAiTip(
+                          '這張照片沒有 Live Photo MOV',
                         );
-                      },
+                        return;
+                      }
 
-                      // -----------------------------------------------------------
-                      // 長按
-                      // Live Photo → 播放 MOV
-                      // 普通照片 → 不做任何事情
-                      // -----------------------------------------------------------
-                      onLongPress: () {
-                        if (!_isLivePhoto(imagePath)) {
-                          _showAiTip('這張照片沒有 Live Photo MOV');
-                          return;
-                        }
+                      Navigator.pop(sheetContext);
 
-                        Navigator.pop(sheetContext);
-
+                      unawaited(
                         _showLivePhotoPreview(
                           imagePath,
                           showSavedImages: true,
-                        );
-                      },
+                        ),
+                      );
+                    },
 
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(4),
@@ -6397,40 +6396,39 @@ bool _isLivePhoto(String photoPath) {
                         );
                       },
 
-                      // -----------------------------------------------------
-                      // 照片縮圖
-                      // -----------------------------------------------------
                       child: GestureDetector(
-                      // -----------------------------------------------------------
-                      // 點擊
-                      //
-                      // 所有照片都按照「普通照片」方式查看
-                      // Live Photo 不在點擊時直接播放
-                      // -----------------------------------------------------------
-                      onTap: () {
-                        _showEnlargedGallery(
-                          index,
-                        );
-                      },
+                          behavior: HitTestBehavior.opaque,
 
-                      // -----------------------------------------------------------
-                      // 長按
-                      //
-                      // 只有 Live Photo 才播放原況
-                      // 普通照片長按不做任何事情
-                      // -----------------------------------------------------------
-                      onLongPress: () {
-                          if (!_isLivePhoto(itemPath)) {
-                            _showAiTip('這張照片沒有 Live Photo MOV');
-                            return;
-                          }
+                          onTap: () {
+                            _showEnlargedGallery(
+                              index,
+                            );
+                          },
 
-                          _showAiTip('正在播放 Live Photo');
+                          onLongPressStart: (_) {
+                            debugPrint(
+                              'LONG PRESS START: $itemPath',
+                            );
 
-                          _showLivePhotoPreview(itemPath);
-                        },
+                            if (!_isLivePhoto(itemPath)) {
+                              _showAiTip(
+                                '這張照片沒有 Live Photo MOV',
+                              );
+                              return;
+                            }
 
-                      child: Container(
+                            _showAiTip(
+                              '正在播放 Live Photo',
+                            );
+
+                            unawaited(
+                              _showLivePhotoPreview(
+                                itemPath,
+                              ),
+                            );
+                          },
+
+                          child: Container(
                           margin:
                               const EdgeInsets.only(
                             bottom: 10,
