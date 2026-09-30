@@ -6,8 +6,6 @@ import 'dart:typed_data';
 import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:camera/camera.dart';
-import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter/gestures.dart';
 import 'package:video_player_win/video_player_win.dart';
@@ -93,6 +91,8 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   final List<String> _savedImages = [];
   final Map<String, String> _livePhotoVideos = {};
 
+  // Live Photo 原始照片，用於最後匯出到 Apple 照片
+  final Map<String, String> _livePhotoOriginalPhotos = {};
   String? _aiTipMessage;
   Timer? _aiTipTimer;
 
@@ -430,6 +430,8 @@ Future<void> _loadSavedImageLists() async {
   final livePhotoAssetIdentifiers =
       <String, String>{};
 
+  final livePhotoOriginalPhotos =
+      <String, String>{};
   final storedVideosJson =
       prefs.getString('live_photo_videos');
 
@@ -437,7 +439,10 @@ Future<void> _loadSavedImageLists() async {
       prefs.getString(
         'live_photo_asset_identifiers',
       );
-
+  final storedOriginalPhotosJson =
+      prefs.getString(
+        'live_photo_original_photos',
+      );
   if (storedVideosJson != null) {
     try {
       final decoded = jsonDecode(
@@ -457,7 +462,28 @@ Future<void> _loadSavedImageLists() async {
       );
     }
   }
+  if (storedOriginalPhotosJson != null) {
+    try {
+      final decoded = jsonDecode(
+        storedOriginalPhotosJson,
+      );
 
+      if (decoded is Map) {
+        decoded.forEach((key, value) {
+          if (key is String &&
+              value is String) {
+            livePhotoOriginalPhotos[key] =
+                value;
+          }
+        });
+      }
+    } catch (error) {
+      debugPrint(
+        '⚠️ Live Photo 原始照片關聯資料讀取失敗：'
+        '$error',
+      );
+    }
+  }
   if (storedAssetsJson != null) {
     try {
       final decoded = jsonDecode(
@@ -501,7 +527,11 @@ Future<void> _loadSavedImageLists() async {
     (photoPath, assetIdentifier) =>
         !livePhotoVideos.containsKey(photoPath),
   );
-
+  livePhotoOriginalPhotos.removeWhere(
+    (photoPath, originalPhotoPath) =>
+        !livePhotoVideos.containsKey(photoPath) ||
+        !File(originalPhotoPath).existsSync(),
+  );
   if (!mounted) return;
 
   setState(() {
@@ -522,6 +552,11 @@ Future<void> _loadSavedImageLists() async {
       ..addAll(
         livePhotoAssetIdentifiers,
       );
+      _livePhotoOriginalPhotos
+        ..clear()
+        ..addAll(
+          livePhotoOriginalPhotos,
+        );
   });
 
   // 同步清理已經不存在的 Live Photo 關聯
@@ -706,197 +741,7 @@ Future<void> _loadSavedImageLists() async {
     });
   }
 
-Future<String> _applyLivePhotoVideoEffects(
-  String sourcePath,
-) async {
-  final sourceFile = File(sourcePath);
 
-  if (!await sourceFile.exists()) {
-    throw Exception('找不到 Live Photo 影片');
-  }
-
-  final directory = sourceFile.parent;
-
-  final outputPath =
-      '${directory.path}${Platform.pathSeparator}'
-      'processed_live_${DateTime.now().microsecondsSinceEpoch}.mov';
-
-  final filters = <String>[];
-
-  // ====================================================
-  // 濾鏡
-  // ====================================================
-
-  switch (_filterMode) {
-    case '鮮明':
-      filters.add(
-        'colorchannelmixer='
-        'rr=1.06:gg=1.06:bb=1.02',
-      );
-      break;
-
-    case '溫暖':
-      filters.add(
-        'colorchannelmixer='
-        'rr=1.08:gg=1.03:bb=0.96',
-      );
-      break;
-
-    case '冷色':
-      filters.add(
-        'colorchannelmixer='
-        'rr=0.96:gg=1.02:bb=1.08',
-      );
-      break;
-
-    case '復古':
-      filters.add(
-        'colorchannelmixer='
-        'rr=1.05:gg=0.97:bb=0.90',
-      );
-      break;
-  }
-
-  // ====================================================
-  // 調色盤
-  // ====================================================
-
-  if (_selectedPalette != '原味') {
-    final paletteColor = _paletteColor(_selectedPalette);
-
-    final paletteOpacity =
-        (0.08 + (_paletteX * 0.10) + (_paletteY * 0.20))
-            .clamp(0.08, 0.35);
-
-    final r = paletteColor.r / 255.0;
-    final g = paletteColor.g / 255.0;
-    final b = paletteColor.b / 255.0;
-
-    final inv = 1.0 - paletteOpacity;
-
-    filters.add(
-      'colorchannelmixer='
-      'rr=${inv + r * paletteOpacity}:'
-      'gg=${inv + g * paletteOpacity}:'
-      'bb=${inv + b * paletteOpacity}',
-    );
-  }
-
-  // ====================================================
-  // 曝光
-  // ====================================================
-
-  final exposure = _exposureValue;
-
-  if (exposure != 0) {
-    final exposureOpacity =
-        (exposure.abs() * 0.18).clamp(0.0, 0.36);
-
-    final multiplier = exposure >= 0
-        ? 1.0 + exposureOpacity
-        : 1.0 - exposureOpacity;
-
-    filters.add(
-      'eq=brightness=${exposure >= 0 ? exposureOpacity : -exposureOpacity}:'
-      'contrast=1.0',
-    );
-
-    if (multiplier != 1.0) {
-      filters.add(
-        'colorchannelmixer='
-        'rr=$multiplier:'
-        'gg=$multiplier:'
-        'bb=$multiplier',
-      );
-    }
-  }
-
-  // ====================================================
-  // 夜景
-  // ====================================================
-
-  if (_nightMode) {
-    filters.add(
-      'colorchannelmixer='
-      'rr=0.98:gg=0.98:bb=1.04',
-    );
-  }
-
-  // ====================================================
-  // 如果沒有任何效果
-  // 就直接複製影片，不重新編碼
-  // ====================================================
-
-  if (filters.isEmpty) {
-    await sourceFile.copy(outputPath);
-    return outputPath;
-  }
-
-  final filterComplex = filters.join(',');
-
-  final command = [
-    '-y',
-    '-i',
-    _quoteFFmpegPath(sourcePath),
-    '-vf',
-    _quoteFFmpegArgument(filterComplex),
-    '-c:v',
-    'h264_videotoolbox',
-    '-b:v',
-    '8M',
-    '-c:a',
-    'copy',
-    '-map',
-    '0:v:0',
-    '-map',
-    '0:a?',
-    '-movflags',
-    'use_metadata_tags',
-    _quoteFFmpegPath(outputPath),
-  ].join(' ');
-
-  debugPrint('🎬 Live Photo FFmpeg command: $command');
-
-  final session = await FFmpegKit.execute(command);
-
-  final returnCode = await session.getReturnCode();
-
-  if (!ReturnCode.isSuccess(returnCode)) {
-    final logs = await session.getAllLogsAsString();
-
-    debugPrint(
-      '❌ Live Photo 影片處理失敗\n'
-      'ReturnCode: $returnCode\n'
-      'Logs:\n$logs',
-    );
-
-    throw Exception(
-      'Live Photo 影片效果處理失敗',
-    );
-  }
-
-  final outputFile = File(outputPath);
-
-  if (!await outputFile.exists()) {
-    throw Exception(
-      'Live Photo 影片處理完成，但找不到輸出檔案',
-    );
-  }
-
-  debugPrint(
-    '✅ Live Photo 影片效果完成：$outputPath',
-  );
-
-  return outputPath;
-}
-
-String _quoteFFmpegPath(String path) {
-  return '"${path.replaceAll('"', r'\"')}"';
-}
-
-String _quoteFFmpegArgument(String value) {
-  return '"${value.replaceAll('"', r'\"')}"';
-}
 
 Future<String> _applyPhotoEffects(String sourcePath) async {
   _showEffectDebug('④-1 進入原生特效處理');
@@ -1140,22 +985,13 @@ Future<void> _capturePhoto() async {
 
     // ====================================================
     // Live Photo 影片
+    //
+    // Apple 照片匯出先使用原始 MOV。
+    // 不重新編碼，避免破壞 Live Photo 配對資訊。
     // ====================================================
     if (liveCapture != null) {
-      try {
-        processedVideoPath =
-            await _applyLivePhotoVideoEffects(
-          liveCapture.videoPath,
-        );
-      } catch (error, stackTrace) {
-        debugPrint(
-          '⚠️ Live Photo 影片效果處理失敗：$error',
-        );
-        debugPrint('$stackTrace');
-
-        processedVideoPath =
-            liveCapture.videoPath;
-      }
+      processedVideoPath =
+          liveCapture.videoPath;
     }
 
     if (!mounted) return;
@@ -1170,20 +1006,28 @@ Future<void> _capturePhoto() async {
     );
 
     setState(() {
-      _capturedImages.add(path);
+    _capturedImages.add(path);
 
-      if (liveCapture != null &&
-          processedVideoPath != null) {
-        _livePhotoVideos[path] =
-            processedVideoPath;
+    if (liveCapture != null &&
+        processedVideoPath != null) {
+      // App 預覽使用的照片 → path
+      _livePhotoVideos[path] =
+          processedVideoPath;
 
-        _livePhotoAssetIdentifiers[path] =
-            liveCapture.assetIdentifier;
-      }
+      // 保留原本的 assetIdentifier
+      _livePhotoAssetIdentifiers[path] =
+          liveCapture.assetIdentifier;
 
-      _isCapturing = false;
-      _captureAnimation = true;
-    });
+      // 最重要：
+      // 保存原始 Live Photo JPG
+      // 最後匯出 Apple 照片時使用
+      _livePhotoOriginalPhotos[path] =
+          originalPath;
+    }
+
+    _isCapturing = false;
+    _captureAnimation = true;
+  });
 
     effectFlow += '\n⑦ 已加入特效照片';
 
@@ -1591,6 +1435,14 @@ Future<void> _capturePhoto() async {
     ),
   );
 
+
+  await prefs.setString(
+    'live_photo_original_photos',
+    jsonEncode(
+      _livePhotoOriginalPhotos,
+    ),
+  );
+
   await prefs.setString(
     'live_photo_asset_identifiers',
     jsonEncode(
@@ -1610,7 +1462,9 @@ Future<void> _deleteLivePhotoResources(
   _livePhotoAssetIdentifiers.remove(
     photoPath,
   );
-
+  _livePhotoOriginalPhotos.remove(
+    photoPath,
+  );
   if (videoPath == null) {
     return;
   }
@@ -1664,9 +1518,31 @@ Future<bool> _saveImageToApplePhotos(String sourcePath) async {
         return false;
       }
 
+      final originalPhotoPath =
+          _livePhotoOriginalPhotos[sourcePath] ??
+          sourcePath;
+
+      final originalPhotoFile =
+          File(originalPhotoPath);
+
+      if (!await originalPhotoFile.exists()) {
+        debugPrint(
+          '❌ Live Photo 原始照片不存在：'
+          '$originalPhotoPath',
+        );
+
+        if (mounted) {
+          _showAiTip(
+            '⚠️ Live Photo 原始照片不存在',
+          );
+        }
+
+        return false;
+      }
+
       final success =
           await _cameraAdapter.saveLivePhoto(
-        photoPath: sourcePath,
+        photoPath: originalPhotoPath,
         videoPath: livePhotoVideo,
       );
 
