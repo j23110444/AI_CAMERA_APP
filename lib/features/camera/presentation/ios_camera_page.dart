@@ -1771,6 +1771,16 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
   }
 }
 
+bool _isLivePhoto(String photoPath) {
+  final videoPath = _livePhotoVideos[photoPath];
+
+  if (videoPath == null || videoPath.isEmpty) {
+    return false;
+  }
+
+  return File(videoPath).existsSync();
+}
+
   Future<void> _showLivePhotoPreview(
   String photoPath, {
   bool showSavedImages = false,
@@ -4988,15 +4998,14 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                     final imageFile = File(imagePath);
 
                     return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+
                       // -----------------------------------------------------------
                       // 點擊
-                      //
-                      // 和普通照片一樣進入照片檢視
+                      // 一般照片 / Live Photo 都按照普通照片查看
                       // -----------------------------------------------------------
                       onTap: () {
-                        Navigator.pop(
-                          sheetContext,
-                        );
+                        Navigator.pop(sheetContext);
 
                         _showEnlargedGallery(
                           index,
@@ -5006,23 +5015,20 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
 
                       // -----------------------------------------------------------
                       // 長按
-                      //
-                      // Live Photo → 播放原況
-                      // 普通照片 → 無動作
+                      // Live Photo → 播放 MOV
+                      // 普通照片 → 不做任何事情
                       // -----------------------------------------------------------
                       onLongPress: () {
-                        if (_livePhotoVideos.containsKey(
-                          imagePath,
-                        )) {
-                          Navigator.pop(
-                            sheetContext,
-                          );
-
-                          _showLivePhotoPreview(
-                            imagePath,
-                            showSavedImages: true,
-                          );
+                        if (!_isLivePhoto(imagePath)) {
+                          return;
                         }
+
+                        Navigator.pop(sheetContext);
+
+                        _showLivePhotoPreview(
+                          imagePath,
+                          showSavedImages: true,
+                        );
                       },
 
                       child: ClipRRect(
@@ -6528,14 +6534,12 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
                       // 普通照片長按不做任何事情
                       // -----------------------------------------------------------
                       onLongPress: () {
-                        if (_livePhotoVideos.containsKey(
-                          itemPath,
-                        )) {
-                          _showLivePhotoPreview(
-                            itemPath,
-                          );
-                        }
-                      },
+                          if (!_isLivePhoto(itemPath)) {
+                            return;
+                          }
+
+                          _showLivePhotoPreview(itemPath);
+                        },
 
                       child: Container(
                           margin:
