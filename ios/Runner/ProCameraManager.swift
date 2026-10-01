@@ -418,6 +418,7 @@ final class ProCameraManager: NSObject {
             lensType
         )
     }
+  }
   // MARK: - Selected Device
 
   private var selectedDevice: AVCaptureDevice? {
