@@ -606,17 +606,6 @@ final class ProCameraManager: NSObject {
     }
   }
 
-// MARK: - Macro Mode
-
-/// Macro 是近距離輔助狀態，不等於 0.5x。
-///
-/// 正常 1x 使用 Wide Virtual Camera。
-/// AVFoundation 在近距離場景會把 active constituent
-/// 切到 Ultra Wide，這裡用它作為 Macro 觸發訊號。
-private var isMacroEnabled = false
-private var isMacroUserDisabled = false
-private var macroNearSubject = false
-private var macroMonitorTimer: Timer?
 
 private var macroVirtualCameraAvailable: Bool {
   guard currentPosition == .back else {
