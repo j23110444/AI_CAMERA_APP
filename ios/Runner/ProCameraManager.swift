@@ -274,8 +274,10 @@ final class ProCameraManager: NSObject {
     // ------------------------------------------------------------
     // Configure Virtual Camera
     //
-    // Macro 開啟 → AUTO
-    // Macro 關閉 → LOCKED
+    // Wide Virtual Camera 使用 AVFoundation 自動 constituent
+    // switching。
+    //
+    // 注意：AUTO 不等於 Macro 開啟。
     // ------------------------------------------------------------
 
     if device.isVirtualDevice {
@@ -526,8 +528,8 @@ final class ProCameraManager: NSObject {
     // ------------------------------------------------------------
     // Virtual Camera
     //
-    // configureVirtualCamera() 會依照
-    // isMacroUserDisabled 決定 AUTO / LOCKED。
+    // Wide 使用 Virtual Camera。
+    // AVFoundation 自動決定 constituent。
     // ------------------------------------------------------------
 
     if device.isVirtualDevice {
@@ -569,283 +571,230 @@ final class ProCameraManager: NSObject {
     }
   }
 
-  // MARK: - Macro Mode
+// MARK: - Macro Mode
 
-  /// 是否存在可用的 Virtual Camera。
-  private var macroVirtualCameraAvailable: Bool {
+/// 是否存在可用的 Virtual Camera。
+private var macroVirtualCameraAvailable: Bool {
 
-    findVirtualCamera(
-      position: .back
-    ) != nil
+  guard currentPosition == .back else {
+    return false
   }
 
-  /// 設定 Virtual Camera 的 constituent switching。
-  ///
-  /// Macro 開啟：
-  ///     .auto
-  ///
-  /// Macro 關閉：
-  ///     .locked
-  ///
-  /// 這樣 Macro UI 狀態與實際 Virtual Camera
-  /// 的自動切換狀態保持一致。
-  private func configureVirtualCamera(
-    _ device: AVCaptureDevice
-  ) throws {
+  return findVirtualCamera(
+    position: .back
+  ) != nil
+}
 
-    guard device.isVirtualDevice else {
+/// 設定 Virtual Camera 的 constituent switching。
+///
+/// 注意：
+/// .auto 並不代表 Macro 開啟。
+/// 它代表讓 AVFoundation 自動選擇適合目前場景的 constituent。
+///
+/// 因此 Macro UI 狀態不能單純用
+/// primaryConstituentDeviceSwitchingBehavior 判斷。
+private func configureVirtualCamera(
+  _ device: AVCaptureDevice
+) throws {
+
+  guard device.isVirtualDevice else {
+    return
+  }
+
+  try device.lockForConfiguration()
+
+  defer {
+    device.unlockForConfiguration()
+  }
+
+  guard
+    device.activePrimaryConstituentDeviceSwitchingBehavior
+      != .unsupported
+  else {
+
+    print(
+      "⚠️ Virtual Camera constituent switching unsupported"
+    )
+
+    return
+  }
+
+  device.setPrimaryConstituentDeviceSwitchingBehavior(
+    .auto,
+    restrictedSwitchingBehaviorConditions: []
+  )
+
+  print(
+    "📷 Virtual Camera switching = AUTO"
+  )
+}
+
+// MARK: Macro Control
+
+func setMacroMode(
+  enabled: Bool
+) throws {
+
+  isMacroUserDisabled = !enabled
+
+  if !enabled {
+
+    isMacroEnabled = false
+
+    print(
+      "🌼 Macro user control disabled"
+    )
+
+    return
+  }
+
+  isMacroUserDisabled = false
+
+  print(
+    "🌼 Macro user control enabled"
+  )
+
+  updateMacroState()
+}
+
+// MARK: Macro State
+
+func macroState() -> [String: Any] {
+
+  return [
+    "enabled":
+      isMacroEnabled,
+
+    "userDisabled":
+      isMacroUserDisabled,
+
+    "available":
+      macroVirtualCameraAvailable
+  ]
+}
+
+// MARK: Macro Monitor
+
+private func startMacroMonitor() {
+
+  macroMonitorTimer?.invalidate()
+  macroMonitorTimer = nil
+
+  guard currentPosition == .back else {
+    return
+  }
+
+  DispatchQueue.main.async { [weak self] in
+
+    guard let self = self else {
       return
     }
 
-    try device.lockForConfiguration()
+    self.macroMonitorTimer =
+      Timer.scheduledTimer(
+        withTimeInterval: 0.30,
+        repeats: true
+      ) { [weak self] _ in
 
-    defer {
-      device.unlockForConfiguration()
-    }
-
-    guard
-      device.primaryConstituentDeviceSwitchingBehavior
-        != .unsupported
-    else {
-
-      print(
-        "⚠️ Virtual Camera does not support constituent switching"
-      )
-
-      return
-    }
-
-    if isMacroUserDisabled {
-
-      device.setPrimaryConstituentDeviceSwitchingBehavior(
-        .locked,
-        restrictedSwitchingBehaviorConditions: []
-      )
-
-      print(
-        "📷 Virtual Camera switching = LOCKED"
-      )
-
-    } else {
-
-      device.setPrimaryConstituentDeviceSwitchingBehavior(
-        .auto,
-        restrictedSwitchingBehaviorConditions: []
-      )
-
-      print(
-        "📷 Virtual Camera switching = AUTO"
-      )
-    }
-  }
-
-  // MARK: Macro Control
-
-  func setMacroMode(
-    enabled: Bool
-  ) throws {
-
-    isMacroUserDisabled = !enabled
-
-    // ------------------------------------------------------------
-    // Macro 只存在於後置 Wide Virtual Camera
-    // ------------------------------------------------------------
-
-    guard
-      currentPosition == .back,
-      currentLensType == "wide",
-      let device = selectedDevice,
-      device.isVirtualDevice
-    else {
-
-      isMacroEnabled = false
-
-      print(
-        "🌼 Macro unavailable on current camera"
-      )
-
-      return
-    }
-
-    try device.lockForConfiguration()
-
-    defer {
-      device.unlockForConfiguration()
-    }
-
-    guard
-      device.primaryConstituentDeviceSwitchingBehavior
-        != .unsupported
-    else {
-
-      isMacroEnabled = false
-
-      print(
-        "⚠️ Macro switching unsupported"
-      )
-
-      return
-    }
-
-    if enabled {
-
-      // ----------------------------------------------------------
-      // Macro ON
-      // ----------------------------------------------------------
-      //
-      // 允許 Virtual Camera 自動選擇 constituent。
-      //
-      // 靠近物體時，AVFoundation 可以自行切換
-      // 至適合近距離對焦的 Ultra Wide constituent。
-      // ----------------------------------------------------------
-
-      device.setPrimaryConstituentDeviceSwitchingBehavior(
-        .auto,
-        restrictedSwitchingBehaviorConditions: []
-      )
-
-      isMacroUserDisabled = false
-
-      print(
-        "🌼 Macro AUTO switching enabled"
-      )
-
-    } else {
-
-      // ----------------------------------------------------------
-      // Macro OFF
-      // ----------------------------------------------------------
-      //
-      // 保留 Virtual Camera。
-      // 但是禁止自動 constituent switching。
-      // ----------------------------------------------------------
-
-      device.setPrimaryConstituentDeviceSwitchingBehavior(
-        .locked,
-        restrictedSwitchingBehaviorConditions: []
-      )
-
-      isMacroEnabled = false
-
-      print(
-        "🌼 Macro AUTO switching disabled"
-      )
-    }
-  }
-
-  // MARK: Macro State
-
-  func macroState() -> [String: Any] {
-
-    return [
-      "enabled":
-        isMacroEnabled,
-
-      "userDisabled":
-        isMacroUserDisabled,
-
-      "available":
-        macroVirtualCameraAvailable
-    ]
-  }
-
-  // MARK: Macro Monitor
-
-  private func startMacroMonitor() {
-
-    macroMonitorTimer?.invalidate()
-
-    DispatchQueue.main.async { [weak self] in
-
-      guard let self = self else {
-        return
+        self?.updateMacroState()
       }
-
-      self.macroMonitorTimer =
-        Timer.scheduledTimer(
-          withTimeInterval: 0.30,
-          repeats: true
-        ) { [weak self] _ in
-
-          self?.updateMacroState()
-        }
-    }
   }
+}
 
-  private func updateMacroState() {
+private func updateMacroState() {
 
-    // ------------------------------------------------------------
-    // 使用者手動關閉 Macro
-    // ------------------------------------------------------------
+  // ------------------------------------------------------------
+  // 使用者關閉 Macro 控制
+  // ------------------------------------------------------------
 
-    guard !isMacroUserDisabled else {
+  guard !isMacroUserDisabled else {
+
+    if isMacroEnabled {
 
       isMacroEnabled = false
 
-      return
+      print(
+        "🌼 Macro UI state = OFF (user disabled)"
+      )
     }
 
-    // ------------------------------------------------------------
-    // 必須是後置 Wide Virtual Camera
-    // ------------------------------------------------------------
+    return
+  }
 
-    guard
-      currentPosition == .back,
-      currentLensType == "wide",
-      let device = selectedDevice,
-      device.isVirtualDevice
-    else {
+  // ------------------------------------------------------------
+  // 只有後置 Wide Virtual Camera 才監控 Macro
+  // ------------------------------------------------------------
+
+  guard
+    currentPosition == .back,
+    currentLensType == "wide",
+    let device = selectedDevice,
+    device.isVirtualDevice
+  else {
+
+    if isMacroEnabled {
 
       isMacroEnabled = false
 
-      return
+      print(
+        "🌼 Macro UI state = OFF (not virtual wide)"
+      )
     }
 
-    // ------------------------------------------------------------
-    // 取得目前實際使用的 constituent
-    // ------------------------------------------------------------
-
-    guard
-      let active =
-        device.activePrimaryConstituent
-    else {
-
-      return
-    }
-
-    let isUltraWide =
-      active.deviceType ==
-        .builtInUltraWideCamera
-
-    // ------------------------------------------------------------
-    // Ultra Wide constituent = Macro Active
-    // ------------------------------------------------------------
-
-    if isUltraWide {
-
-      if !isMacroEnabled {
-
-        isMacroEnabled = true
-
-        print(
-          "🌼 Macro constituent active:",
-          active.localizedName
-        )
-      }
-
-    } else {
-
-      if isMacroEnabled {
-
-        isMacroEnabled = false
-
-        print(
-          "📷 Macro constituent inactive:",
-          active.localizedName
-        )
-      }
-    }
+    return
   }
+
+  // ------------------------------------------------------------
+  // Virtual Camera 必須支援 constituent switching
+  // ------------------------------------------------------------
+
+  guard
+    device.activePrimaryConstituentDeviceSwitchingBehavior
+      != .unsupported
+  else {
+
+    if isMacroEnabled {
+      isMacroEnabled = false
+    }
+
+    return
+  }
+
+  // ------------------------------------------------------------
+  // Debug：只記錄目前 Virtual Camera 實際使用的 constituent
+  //
+  // 注意：
+  // Ultra Wide ≠ Macro
+  //
+  // 目前這裡不再直接把 Ultra Wide 判定成 Macro。
+  // ------------------------------------------------------------
+
+  if let active =
+    device.activePrimaryConstituent {
+
+    print(
+      "📷 Active constituent:",
+      active.localizedName,
+      active.deviceType.rawValue
+    )
+  }
+
+  // ------------------------------------------------------------
+  // 目前 Macro 狀態不由 Ultra Wide 單獨決定
+  //
+  // 真正 Macro 判斷後續會接：
+  // 近距離對焦 / focus distance / 系統 Macro 條件
+  // ------------------------------------------------------------
+
+  if isMacroEnabled {
+
+    isMacroEnabled = false
+
+    print(
+      "🌼 Macro UI state = OFF (no verified macro condition)"
+    )
+  }
+}
 
   // MARK: - Selected Device
 
@@ -2139,66 +2088,68 @@ final class ProCameraManager: NSObject {
 
   // MARK: - Focus Point
 
-  func setFocusPoint(
-    x: Double,
-    y: Double
-  ) throws {
+func setFocusPoint(
+  x: Double,
+  y: Double
+) throws {
 
-    guard let device = selectedDevice else {
-      throw CameraManagerError.cameraNotInitialized
-    }
+  guard let device = selectedDevice else {
+    throw CameraManagerError.cameraNotInitialized
+  }
 
-    guard device.isFocusPointOfInterestSupported else {
-
-      throw CameraManagerError.unsupported(
-        "目前鏡頭不支援指定對焦點"
-      )
-    }
-
-    let point =
-      CGPoint(
-        x: min(max(x, 0.0), 1.0),
-        y: min(max(y, 0.0), 1.0)
-      )
-
-    try device.lockForConfiguration()
-
-    defer {
-      device.unlockForConfiguration()
-    }
-
-    device.focusPointOfInterest =
-      point
-
-    if device.isFocusModeSupported(
-      .continuousAutoFocus
-    ) {
-
-      device.focusMode =
-        .continuousAutoFocus
-    }
-
-    guard device.isFocusModeSupported(
-      .autoFocus
-    ) else {
-
-      throw CameraManagerError.unsupported(
-        "目前鏡頭不支援單次自動對焦"
-      )
-    }
-
-    device.focusMode =
-      .autoFocus
-
-    print(
-      "🎯 Focus applied:",
-      "device =",
-      device.localizedName,
-      "point =",
-      point,
-      "mode = autoFocus"
+  guard device.isFocusPointOfInterestSupported else {
+    throw CameraManagerError.unsupported(
+      "目前鏡頭不支援指定對焦點"
     )
   }
+
+  let point = CGPoint(
+    x: min(max(x, 0.0), 1.0),
+    y: min(max(y, 0.0), 1.0)
+  )
+
+  try device.lockForConfiguration()
+
+  defer {
+    device.unlockForConfiguration()
+  }
+
+  // ------------------------------------------------------------
+  // 設定對焦點
+  // ------------------------------------------------------------
+
+  device.focusPointOfInterest = point
+
+  // ------------------------------------------------------------
+  // 使用連續自動對焦
+  //
+  // 不再設定 .autoFocus。
+  //
+  // 讓 Virtual Camera / AVFoundation 持續根據目前場景
+  // 自動調整對焦，有利於近距離物體與 Macro 行為。
+  // ------------------------------------------------------------
+
+  guard device.isFocusModeSupported(
+    .continuousAutoFocus
+  ) else {
+
+    throw CameraManagerError.unsupported(
+      "目前鏡頭不支援連續自動對焦"
+    )
+  }
+
+  device.focusMode =
+    .continuousAutoFocus
+
+  print(
+    "🎯 Focus applied:",
+    "device =",
+    device.localizedName,
+    "point =",
+    point,
+    "mode = continuousAutoFocus"
+  )
+}
 
   // MARK: - White Balance
 
