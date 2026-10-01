@@ -333,11 +333,11 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     _startMacroStateMonitor();
   }
 
-  void _startMacroStateMonitor() {
+ void _startMacroStateMonitor() {
   _macroStateTimer?.cancel();
 
   _macroStateTimer = Timer.periodic(
-    const Duration(milliseconds: 300),
+    const Duration(milliseconds: 250),
     (_) async {
       if (!mounted ||
           _cameraInitializing ||
@@ -360,6 +360,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
             _macroAvailable = state.available;
           });
         }
+
       } catch (e) {
         debugPrint(
           '⚠️ Macro state check failed: $e',
@@ -389,102 +390,162 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   }
 
   Future<void> _switchCamera() async {
-    if (_cameraSwitching || _cameraInitializing) return;
-    setState(() => _cameraSwitching = true);
-    try {
-      await _cameraAdapter.switchCamera();
-      if (!mounted) return;
-      setState(() {
-        _zoomLevel = 1.0;
-        _isUltraWideActive = false;
-        _focusPoint = null;
-        _isFocusVisible = false;
-        _isAeAfLocked = false;
-      });
-      _showAiTip('🔄 已切換鏡頭');
-    } catch (error) {
-      if (mounted) _showAiTip('⚠️ 鏡頭切換失敗：$error');
-    } finally {
-      if (mounted) setState(() => _cameraSwitching = false);
-    }
-  }
+  if (_cameraSwitching || _cameraInitializing) return;
 
-  Future<void> _switchToUltraWide() async {
-    if (_cameraSwitching || _cameraInitializing) return;
-    setState(() => _cameraSwitching = true);
-    try {
-      await _cameraAdapter.switchToUltraWide();
-      if (!mounted) return;
+  setState(() {
+    _cameraSwitching = true;
+  });
+
+  try {
+    await _cameraAdapter.switchCamera();
+
+    if (!mounted) return;
+
+    setState(() {
+      _zoomLevel = 1.0;
+      _isUltraWideActive = false;
+
+      _macroEnabled = false;
+      _macroUserDisabled = false;
+      _macroAvailable = false;
+
+      _focusPoint = null;
+      _isFocusVisible = false;
+      _isAeAfLocked = false;
+    });
+
+    _showAiTip('🔄 已切換鏡頭');
+
+  } catch (error) {
+
+    if (mounted) {
+      _showAiTip(
+        '⚠️ 鏡頭切換失敗：$error',
+      );
+    }
+
+  } finally {
+
+    if (mounted) {
       setState(() {
-        _zoomLevel = 0.5;
-        _isUltraWideActive = true;
-        _focusPoint = null;
-        _isFocusVisible = false;
-        _isAeAfLocked = false;
+        _cameraSwitching = false;
       });
-      _showAiTip('📷 已切換至 0.5x 廣角');
-    } catch (error) {
-      if (mounted) _showAiTip('⚠️ 0.5x 廣角無法使用：$error');
-    } finally {
-      if (mounted) setState(() => _cameraSwitching = false);
     }
   }
+}
+
+ Future<void> _switchToUltraWide() async {
+  if (_cameraSwitching || _cameraInitializing) return;
+
+  setState(() {
+    _cameraSwitching = true;
+  });
+
+  try {
+    await _cameraAdapter.switchToUltraWide();
+
+    if (!mounted) return;
+
+    setState(() {
+      _zoomLevel = 0.5;
+      _isUltraWideActive = true;
+
+      // 0.5x 是正常 Ultra Wide，
+      // 不等於 Macro。
+      _macroEnabled = false;
+      _macroUserDisabled = false;
+      _macroAvailable = false;
+
+      _focusPoint = null;
+      _isFocusVisible = false;
+      _isAeAfLocked = false;
+    });
+
+    _showAiTip(
+      '📷 已切換至 0.5x 廣角',
+    );
+
+  } catch (error) {
+
+    if (mounted) {
+      _showAiTip(
+        '⚠️ 0.5x 廣角無法使用：$error',
+      );
+    }
+
+  } finally {
+
+    if (mounted) {
+      setState(() {
+        _cameraSwitching = false;
+      });
+    }
+  }
+}
 
 
   Future<void> _switchToStandardWide() async {
-    if (_cameraSwitching || _cameraInitializing) return;
-    setState(() => _cameraSwitching = true);
-    try {
-      await _cameraAdapter.switchToStandardWide();
-      if (!mounted) return;
+  if (_cameraSwitching || _cameraInitializing) return;
+
+  setState(() {
+    _cameraSwitching = true;
+  });
+
+  try {
+    await _cameraAdapter.switchToStandardWide();
+
+    if (!mounted) return;
+
+    setState(() {
+      _zoomLevel = 1.0;
+      _isUltraWideActive = false;
+
+      // 不要在這裡設定：
+      //
+      // _macroEnabled = false;
+      //
+      // 因為回到 1x 後，
+      // Native Virtual Camera 可能立刻偵測到
+      // 近距離 Macro。
+      _macroUserDisabled = false;
+
+      _focusPoint = null;
+      _isFocusVisible = false;
+      _isAeAfLocked = false;
+    });
+
+  } catch (error) {
+
+    if (mounted) {
+      _showAiTip(
+        '⚠️ 1x 廣角無法使用：$error',
+      );
+    }
+
+  } finally {
+
+    if (mounted) {
       setState(() {
-        _zoomLevel = 1.0;
-        _isUltraWideActive = false;
-        _focusPoint = null;
-        _isFocusVisible = false;
-        _isAeAfLocked = false;
+        _cameraSwitching = false;
       });
-    } catch (error) {
-      if (mounted) _showAiTip('⚠️ 1x 廣角無法使用：$error');
-    } finally {
-      if (mounted) setState(() => _cameraSwitching = false);
     }
   }
+}
 
   Future<void> _toggleMacroControl() async {
-    if (_cameraSwitching ||
-        _cameraInitializing ||
-        !_macroAvailable) {
-      return;
-    }
+  if (_cameraSwitching ||
+      _cameraInitializing ||
+      !_macroAvailable) {
+    return;
+  }
 
-    if (_macroUserDisabled) {
-      // 重新允許自動 Macro。
-      try {
-        await _cameraAdapter.setMacroMode(true);
+  try {
+    // ----------------------------------------------------------
+    // 目前是 Macro ON
+    // → 使用者手動關閉
+    // ----------------------------------------------------------
 
-        if (!mounted) return;
-
-        setState(() {
-          _macroUserDisabled = false;
-        });
-
-        _showAiTip('🌼 已重新啟用微距自動控制');
-      } catch (e) {
-        if (mounted) {
-          _showAiTip('⚠️ 無法重新啟用微距：$e');
-        }
-      }
-
-      return;
-    }
-
-    // 使用者主動關閉 Macro。
-    try {
-      setState(() {
-        _cameraSwitching = true;
-      });
-
+    if (_macroEnabled) {
       await _cameraAdapter.setMacroMode(false);
 
       if (!mounted) return;
@@ -492,30 +553,46 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       setState(() {
         _macroEnabled = false;
         _macroUserDisabled = true;
-
-        // Macro 不應等同 0.5x。
-        // 關閉 Macro 後回到標準 Wide。
-        _zoomLevel = 1.0;
-        _isUltraWideActive = false;
-
-        _focusPoint = null;
-        _isFocusVisible = false;
-        _isAeAfLocked = false;
       });
 
-      _showAiTip('🌼 微距已關閉');
-    } catch (e) {
-      if (mounted) {
-        _showAiTip('⚠️ 微距關閉失敗：$e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _cameraSwitching = false;
-        });
-      }
+      // 不要：
+      //
+      // _zoomLevel = 1.0;
+      // _isUltraWideActive = false;
+      //
+      // Macro 不等於 0.5x，
+      // 也不應該因為關閉 Macro 就強制改變目前倍率。
+
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // 如果目前處於 userDisabled
+    //
+    // 正常情況下 UI 已經隱藏，
+    // 因此這裡只是保留 API 完整性。
+    // ----------------------------------------------------------
+
+    if (_macroUserDisabled) {
+      await _cameraAdapter.setMacroMode(true);
+
+      if (!mounted) return;
+
+      setState(() {
+        _macroUserDisabled = false;
+      });
+
+      return;
+    }
+
+  } catch (e) {
+    if (mounted) {
+      _showAiTip(
+        '⚠️ 微距控制失敗：$e',
+      );
     }
   }
+}
   
 Future<void> _loadSavedImageLists() async {
   
@@ -7254,18 +7331,27 @@ bool _isLivePhoto(String photoPath) {
   }
 
   Widget _buildMacroControl() {
-  // 沒有 Ultra Wide 就完全不顯示。
-  if (!_macroAvailable) {
+  // ------------------------------------------------------------
+  // Macro UI 只有在：
+  //
+  // 1. 有後置 Virtual Camera
+  // 2. 自動 Macro 已被觸發
+  //
+  // 才顯示。
+  //
+  // 使用者手動關閉後：
+  // _macroAvailable = false
+  // → UI 直接消失。
+  // ------------------------------------------------------------
+
+  if (!_macroAvailable ||
+      _macroUserDisabled) {
     return const SizedBox.shrink();
   }
 
-  // Macro 自動啟動：
-  // 黃色小花。
-  final bool isActive = _macroEnabled;
-
-  // 使用者手動關閉：
-  // 灰色小花 + 斜線。
-  final bool isDisabled = _macroUserDisabled;
+  if (!_macroEnabled) {
+    return const SizedBox.shrink();
+  }
 
   return GestureDetector(
     behavior: HitTestBehavior.opaque,
@@ -7277,10 +7363,8 @@ bool _isLivePhoto(String photoPath) {
         child: CustomPaint(
           size: const Size(40, 40),
           painter: MacroFlowerPainter(
-            color: isActive
-                ? Colors.yellowAccent
-                : Colors.white54,
-            disabled: isDisabled,
+            color: Colors.yellowAccent,
+            disabled: false,
           ),
         ),
       ),
