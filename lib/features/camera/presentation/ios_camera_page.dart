@@ -611,30 +611,34 @@ Future<void> _loadSavedImageLists() async {
   });
 
   // AVFoundation 的 focusPointOfInterest 座標
-  final cameraPoint = Offset(
-    uiPoint.dx,
-    1.0 - uiPoint.dy,
-  );
+    // Flutter 預覽座標直接傳入原生相機。
+    // 不額外反轉 Y 軸。
+      final cameraPoint = Offset(
+        uiPoint.dx,
+        uiPoint.dy,
+      );
 
-  unawaited(
-    () async {
-      try {
-        await _cameraAdapter.setFocusPoint(
-          cameraPoint.dx,
-          cameraPoint.dy,
-        );
+      unawaited(() async {
+        try {
+          await _cameraAdapter.setFocusPoint(
+            cameraPoint.dx,
+            cameraPoint.dy,
+          );
 
-        debugPrint(
-          '🎯 Focus request success: '
-          'UI=(${uiPoint.dx}, ${uiPoint.dy}) '
-          'Camera=(${cameraPoint.dx}, ${cameraPoint.dy})',
-        );
-      } catch (e, stackTrace) {
-        debugPrint('❌ Focus request failed: $e');
-        debugPrint('$stackTrace');
-      }
-    }(),
-  );
+          debugPrint(
+            '🎯 Focus applied: '
+            'x=${cameraPoint.dx}, '
+            'y=${cameraPoint.dy}',
+          );
+        } catch (e, stackTrace) {
+          debugPrint('❌ Focus request failed: $e');
+          debugPrint('$stackTrace');
+
+          if (mounted) {
+            _showAiTip('⚠️ 對焦失敗：$e');
+          }
+        }
+      }());
 
   _focusTimer?.cancel();
   _focusTimer = Timer(const Duration(seconds: 2), () {
@@ -761,10 +765,10 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
     final paletteColor = _paletteColor(_selectedPalette);
 
     final paletteOpacity =
-        _selectedPalette == '原味'
-            ? 0.0
-            : (0.04 + (_paletteX * 0.05) + (_paletteY * 0.12))
-                .clamp(0.04, 0.21);
+    _selectedPalette == '原味'
+        ? 0.0
+        : (0.01 + (_paletteX * 0.025) + (_paletteY * 0.085))
+            .clamp(0.01, 0.12);
 
     // Flutter Color → 0~1 RGB
     final paletteRed =
@@ -1621,36 +1625,89 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
 
   try {
     if (!await file.exists()) {
-      debugPrint('Candidate image does not exist: $sourcePath');
+      debugPrint(
+        'Candidate image does not exist: $sourcePath',
+      );
       return false;
     }
-  } catch (error, stackTrace) {
-    debugPrint('Failed to check image: $error');
-    debugPrint('$stackTrace');
-    return false;
-  }
 
-  if (!mounted) return false;
+    // ------------------------------------------------------------
+    // 先真正保存到 Apple 原生照片
+    // ------------------------------------------------------------
 
-  setState(() {
-    _capturedImages.remove(sourcePath);
+    final savedToApplePhotos =
+        await _saveImageToApplePhotos(sourcePath);
 
-    if (!_savedImages.contains(sourcePath)) {
-      _savedImages.add(sourcePath);
+    if (!savedToApplePhotos) {
+      debugPrint(
+        '❌ 無法保存到 Apple 照片',
+      );
+      return false;
     }
-  });
 
-  try {
+    // ------------------------------------------------------------
+    // Apple Photos 已經成功保存
+    // 現在才從 App 移除
+    // ------------------------------------------------------------
+
+    if (!mounted) {
+      return false;
+    }
+
+    setState(() {
+      _capturedImages.remove(sourcePath);
+
+      if (!_savedImages.contains(sourcePath)) {
+        _savedImages.add(sourcePath);
+      }
+    });
+
+    // ------------------------------------------------------------
+    // 刪除 App 內照片檔案
+    // ------------------------------------------------------------
+
+    try {
+      if (await file.exists()) {
+        await file.delete();
+
+        debugPrint(
+          '🗑️ 已刪除 App 內照片：$sourcePath',
+        );
+      }
+    } catch (error) {
+      debugPrint(
+        '⚠️ App 照片刪除失敗：$error',
+      );
+    }
+
+    // ------------------------------------------------------------
+    // Live Photo 資源
+    // ------------------------------------------------------------
+
+    await _deleteLivePhotoResources(
+      sourcePath,
+    );
+
+    // ------------------------------------------------------------
+    // 更新 SharedPreferences
+    // ------------------------------------------------------------
+
     await _persistImageLists();
-    debugPrint('Image saved to App gallery: $sourcePath');
-    return true;
-  } catch (error, stackTrace) {
-    debugPrint('Failed to persist image lists: $error');
-    debugPrint('$stackTrace');
 
-    if (mounted) {
-      _showAiTip('⚠️ 圖片保存失敗');
-    }
+    debugPrint(
+      '✅ 已保存到 Apple 照片並清除 App 原始照片',
+    );
+
+    return true;
+
+  } catch (error, stackTrace) {
+    debugPrint(
+      '❌ 保存候選照片失敗：$error',
+    );
+
+    debugPrint(
+      '$stackTrace',
+    );
 
     return false;
   }
@@ -6175,85 +6232,45 @@ bool _isLivePhoto(String photoPath) {
                         // =========================================
                         // 右滑 → 保存
                         // =========================================
-                        if (direction ==
-                            DismissDirection.startToEnd) {
+                        if (direction == DismissDirection.startToEnd) {
                           if (!isRealImage) {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
+                            ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text(
-                                  '⚠️ 此項目不是可保存的圖片檔案',
-                                ),
-                                duration:
-                                    Duration(seconds: 1),
+                                content: Text('此項目不是可保存的圖片檔案'),
+                                duration: Duration(seconds: 1),
                               ),
                             );
 
                             return false;
                           }
-
-                          debugPrint(
-                            '========================================',
-                          );
-                          debugPrint(
-                            '➡️ RIGHT SWIPE SAVE',
-                          );
-                          debugPrint(
-                            '➡️ SOURCE: $itemPath',
-                          );
-                          debugPrint(
-                            '➡️ EXISTS: ${imageFile.existsSync()}',
-                          );
 
                           final savedSuccessfully =
-                              await _saveCandidateToGallery(
-                            itemPath,
-                          );
-
-                          debugPrint(
-                            '➡️ SAVE RESULT: $savedSuccessfully',
-                          );
-                          debugPrint(
-                            '========================================',
-                          );
+                              await _saveCandidateToGallery(itemPath);
 
                           if (!savedSuccessfully) {
-                            if (!context.mounted) {
-                              return false;
-                            }
+                            if (!context.mounted) return false;
 
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
+                            ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text(
-                                  '⚠️ 照片保存失敗',
-                                ),
-                                duration:
-                                    Duration(seconds: 1),
+                                content: Text('照片保存失敗'),
+                                duration: Duration(seconds: 1),
                               ),
                             );
 
                             return false;
                           }
 
-                          if (!context.mounted) {
-                            return false;
-                          }
+                          if (!context.mounted) return false;
 
-                          ScaffoldMessenger.of(context)
-                              .showSnackBar(
+                          ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text(
-                                '✅ AI 精選照片已保存',
-                              ),
-                              duration:
-                                  Duration(seconds: 1),
+                              content: Text('已保存到裝置相簿'),
+                              duration: Duration(seconds: 1),
                             ),
                           );
 
-                          // _saveCandidateToGallery()
-                          // 已經從 _capturedImages 移除
-                          return false;
+                          // 保存成功，允許照片向右滑出。
+                          return true;
                         }
 
                         return false;
@@ -6696,76 +6713,71 @@ bool _isLivePhoto(String photoPath) {
                             });
                           },
                           onHorizontalDragUpdate: (details) async {
-                                final nextZoom = (_zoomLevel - details.primaryDelta! * 0.01)
-                                    .clamp(0.5, 5.0)
-                                    .toDouble();
+                            if (_cameraSwitching || _cameraInitializing) return;
 
-                                final shouldUseUltraWide = nextZoom < 1.0;
+                            final nextZoom = (_zoomLevel - details.primaryDelta! * 0.01)
+                                .clamp(0.5, 5.0)
+                                .toDouble();
+
+                            final shouldUseUltraWide = nextZoom < 1.0;
+
+                            setState(() {
+                              _zoomLevel = nextZoom;
+                            });
+
+                            // 跨越 1x 時切換實體鏡頭
+                            if (shouldUseUltraWide != _isUltraWideActive) {
+                              setState(() {
+                                _cameraSwitching = true;
+                              });
+
+                              try {
+                                if (shouldUseUltraWide) {
+                                  await _cameraAdapter.switchToUltraWide();
+                                } else {
+                                  await _cameraAdapter.switchToStandardWide();
+                                }
+
+                                if (!mounted) return;
 
                                 setState(() {
-                                  _zoomLevel = nextZoom;
+                                  _isUltraWideActive = shouldUseUltraWide;
+                                  _focusPoint = null;
+                                  _isFocusVisible = false;
+                                  _isAeAfLocked = false;
                                 });
 
-                                // ---------------------------------------------------------------
-                                // 跨過 1.0x 才切換實體鏡頭
-                                // ---------------------------------------------------------------
-
-                                if (shouldUseUltraWide != _isUltraWideActive &&
-                                    !_cameraSwitching &&
-                                    !_cameraInitializing) {
+                                // 切換完成後再設定原生變焦
+                                await _cameraAdapter.setZoom(
+                                  shouldUseUltraWide ? 1.0 : nextZoom,
+                                );
+                              } catch (error) {
+                                if (mounted) {
                                   setState(() {
-                                    _cameraSwitching = true;
+                                    _zoomLevel = _isUltraWideActive ? 0.5 : 1.0;
                                   });
 
-                                  try {
-                                    if (shouldUseUltraWide) {
-                                      await _cameraAdapter.switchToUltraWide();
-                                    } else {
-                                      await _cameraAdapter.switchToStandardWide();
-                                    }
-
-                                    if (!mounted) return;
-
-                                    setState(() {
-                                      _isUltraWideActive = shouldUseUltraWide;
-                                      _focusPoint = null;
-                                      _isFocusVisible = false;
-                                      _isAeAfLocked = false;
-                                    });
-                                  } catch (error) {
-                                    if (mounted) {
-                                      _showAiTip(
-                                        shouldUseUltraWide
-                                            ? '⚠️ 0.5x 廣角無法使用：$error'
-                                            : '⚠️ 1x 廣角無法使用：$error',
-                                      );
-                                    }
-                                  } finally {
-                                    if (mounted) {
-                                      setState(() {
-                                        _cameraSwitching = false;
-                                      });
-                                    }
-                                  }
+                                  _showAiTip('⚠️ 鏡頭切換失敗：$error');
                                 }
-
-                                // ---------------------------------------------------------------
-                                // UI zoom → Native zoom
-                                // ---------------------------------------------------------------
-
-                                final nativeZoom = shouldUseUltraWide
-                                    ? (nextZoom / 0.5).clamp(1.0, 5.0).toDouble()
-                                    : nextZoom.clamp(1.0, 5.0).toDouble();
-
-                                // 鏡頭切換期間不要把 zoom 套到舊鏡頭
-                                if (_cameraSwitching) {
-                                  return;
+                              } finally {
+                                if (mounted) {
+                                  setState(() {
+                                    _cameraSwitching = false;
+                                  });
                                 }
+                              }
 
-                                unawaited(
-                                  _cameraAdapter.setZoom(nativeZoom),
-                                );
-                              },
+                              return;
+                            }
+
+                            // UI zoom → Native zoom
+                            // 超廣角固定原生 1x，主鏡頭使用實際變焦倍率
+                            final nativeZoom = _isUltraWideActive ? 1.0 : nextZoom;
+
+                            unawaited(
+                              _cameraAdapter.setZoom(nativeZoom),
+                            );
+                          },
                           onHorizontalDragEnd: (details) {
                             setState(() {
                               _isZoomDragging = false;
@@ -6805,7 +6817,7 @@ bool _isLivePhoto(String photoPath) {
                               ],
                             ),
                           ),
-                        ),
+                        )
                       ],
                     ),
                   if (!_isRecording &&

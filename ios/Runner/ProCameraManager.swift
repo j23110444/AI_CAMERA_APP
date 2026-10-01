@@ -556,118 +556,135 @@ func applyPhotoEffects(
     print("🎨 exposure:", exposure)
     print("🎨 night:", nightMode)
 
+   
     // ------------------------------------------------------------
-    // 2. Filter
+    // 2. Filter：實際影像色彩處理
     // ------------------------------------------------------------
+
+    func applyColorControls(
+      saturation: Float,
+      contrast: Float,
+      brightness: Float
+    ) {
+      let filter = CIFilter.colorControls()
+      filter.inputImage = image
+      filter.saturation = saturation
+      filter.contrast = contrast
+      filter.brightness = brightness
+
+      if let output = filter.outputImage {
+        image = output
+      }
+    }
+
+    func applyTemperature(
+      temperature: Float,
+      tint: Float = 0
+    ) {
+      let filter = CIFilter.temperatureAndTint()
+      filter.inputImage = image
+      filter.neutral = CIVector(
+        x: 6500,
+        y: 0
+      )
+      filter.targetNeutral = CIVector(
+        x: CGFloat(temperature),
+        y: CGFloat(tint)
+      )
+
+      if let output = filter.outputImage {
+        image = output
+      }
+    }
+
+    func applyHighlightShadow(
+      shadows: Float,
+      highlights: Float
+    ) {
+      let filter = CIFilter.highlightShadowAdjust()
+      filter.inputImage = image
+      filter.shadowAmount = shadows
+      filter.highlightAmount = highlights
+
+      if let output = filter.outputImage {
+        image = output
+      }
+    }
 
     switch filter {
 
     case "鮮明":
-
-        let colorControls =
-            CIFilter.colorControls()
-
-        colorControls.inputImage = image
-        colorControls.saturation = 1.18
-        colorControls.contrast = 1.08
-        colorControls.brightness = 0.02
-
-        if let output =
-            colorControls.outputImage {
-
-            image = output
-        }
-
-        print("🎨 Filter: 鮮明")
+      applyColorControls(
+        saturation: 1.22,
+        contrast: 1.12,
+        brightness: 0.01
+      )
+      applyHighlightShadow(
+        shadows: 0.15,
+        highlights: 0.92
+      )
 
     case "溫暖":
-
-        image = applyColorOverlay(
-            image: image,
-            red: 1.0,
-            green: 0.72,
-            blue: 0.42,
-            opacity: 0.14
-        )
-
-        print("🎨 Filter: 溫暖")
+      applyTemperature(
+        temperature: 7200,
+        tint: 4
+      )
+      applyColorControls(
+        saturation: 1.08,
+        contrast: 1.04,
+        brightness: 0.015
+      )
 
     case "冷色":
-
-        image = applyColorOverlay(
-            image: image,
-            red: 0.40,
-            green: 0.68,
-            blue: 1.0,
-            opacity: 0.14
-        )
-
-        print("🎨 Filter: 冷色")
+      applyTemperature(
+        temperature: 4300,
+        tint: -3
+      )
+      applyColorControls(
+        saturation: 1.04,
+        contrast: 1.06,
+        brightness: 0
+      )
 
     case "復古":
-
-        let colorControls =
-            CIFilter.colorControls()
-
-        colorControls.inputImage = image
-        colorControls.saturation = 0.82
-        colorControls.contrast = 1.04
-        colorControls.brightness = 0.01
-
-        if let output =
-            colorControls.outputImage {
-
-            image = output
-        }
-
-        image = applyColorOverlay(
-            image: image,
-            red: 0.55,
-            green: 0.36,
-            blue: 0.20,
-            opacity: 0.10
-        )
-
-        print("🎨 Filter: 復古")
+      applyColorControls(
+        saturation: 0.78,
+        contrast: 0.92,
+        brightness: 0.035
+      )
+      applyHighlightShadow(
+        shadows: 0.35,
+        highlights: 0.85
+      )
+      image = applyColorOverlay(
+        image: image,
+        red: 0.58,
+        green: 0.39,
+        blue: 0.23,
+        opacity: 0.07
+      )
 
     default:
-
-        print("🎨 Filter: 原味")
+      break
     }
 
     // ------------------------------------------------------------
-    // 3. Palette
+    // 3. Palette：自訂色彩調整
     // ------------------------------------------------------------
 
-    let clampedPaletteOpacity =
-        min(
-            max(
-                paletteOpacity,
-                0.0
-            ),
-            1.0
-        )
+    let clampedPaletteOpacity = min(
+      max(paletteOpacity, 0.0),
+      0.12
+    )
 
-    if clampedPaletteOpacity > 0.0 {
-
-        image = applyColorOverlay(
-            image: image,
-            red: paletteRed,
-            green: paletteGreen,
-            blue: paletteBlue,
-            opacity: clampedPaletteOpacity
-        )
-
-        print(
-            "🎨 Palette applied:",
-            paletteRed,
-            paletteGreen,
-            paletteBlue,
-            clampedPaletteOpacity
-        )
-    } else {
-
-        print("🎨 Palette: 原味")
+    if clampedPaletteOpacity > 0.001 {
+      image = applyColorOverlay(
+        image: image,
+        red: paletteRed,
+        green: paletteGreen,
+        blue: paletteBlue,
+        opacity: clampedPaletteOpacity
+      )
     }
 
     // ------------------------------------------------------------
@@ -1553,89 +1570,55 @@ private func applyColorOverlay(
   // MARK: - Focus Point
 
   func setFocusPoint(
-    x: Double,
-    y: Double
-  ) throws {
+  x: Double,
+  y: Double
+) throws {
 
-    guard let device = selectedDevice else {
-      throw CameraManagerError.cameraNotInitialized
-    }
-
-    let point =
-      CGPoint(
-        x: x,
-        y: y
-      )
-
-    print(
-      "🎯 Focus request:",
-      x,
-      y
-    )
-
-    print(
-      "🎯 Device:",
-      device.localizedName
-    )
-
-    try device.lockForConfiguration()
-
-    defer {
-      device.unlockForConfiguration()
-    }
-
-    guard device.isFocusPointOfInterestSupported else {
-
-      print(
-        "⚠️ Focus point of interest 不支援"
-      )
-
-      throw CameraManagerError.unsupported(
-        "目前鏡頭不支援指定對焦點"
-      )
-    }
-
-    device.focusPointOfInterest =
-      point
-
-    print(
-      "🎯 Focus point applied:",
-      point
-    )
-
-    if device.isFocusModeSupported(
-      .autoFocus
-    ) {
-
-      device.focusMode =
-        .autoFocus
-
-      print(
-        "🎯 Focus mode: autoFocus"
-      )
-
-    } else if device.isFocusModeSupported(
-      .continuousAutoFocus
-    ) {
-
-      device.focusMode =
-        .continuousAutoFocus
-
-      print(
-        "🎯 Focus mode: continuousAutoFocus"
-      )
-
-    } else {
-
-      print(
-        "⚠️ Device does not support autofocus"
-      )
-
-      throw CameraManagerError.unsupported(
-        "目前鏡頭不支援自動對焦"
-      )
-    }
+  guard let device = selectedDevice else {
+    throw CameraManagerError.cameraNotInitialized
   }
+
+  guard device.isFocusPointOfInterestSupported else {
+    throw CameraManagerError.unsupported(
+      "目前鏡頭不支援指定對焦點"
+    )
+  }
+
+  let point = CGPoint(
+    x: min(max(x, 0.0), 1.0),
+    y: min(max(y, 0.0), 1.0)
+  )
+
+  try device.lockForConfiguration()
+
+  defer {
+    device.unlockForConfiguration()
+  }
+
+  // 設定指定對焦位置。
+  device.focusPointOfInterest = point
+
+  // 先切換至連續對焦，再啟動單次自動對焦，
+  // 讓重複點擊也能重新觸發對焦。
+  if device.isFocusModeSupported(.continuousAutoFocus) {
+    device.focusMode = .continuousAutoFocus
+  }
+
+  guard device.isFocusModeSupported(.autoFocus) else {
+    throw CameraManagerError.unsupported(
+      "目前鏡頭不支援單次自動對焦"
+    )
+  }
+
+  device.focusMode = .autoFocus
+
+  print(
+    "🎯 Focus applied:",
+    "device =", device.localizedName,
+    "point =", point,
+    "mode = autoFocus"
+  )
+}
 
   // MARK: - White Balance
 
