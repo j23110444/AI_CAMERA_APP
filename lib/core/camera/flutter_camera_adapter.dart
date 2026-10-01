@@ -773,6 +773,42 @@ class FlutterCameraAdapter implements CameraPort {
     );
   }
 
+   // ---------------------------------------------------------------------------
+// Macro
+// ---------------------------------------------------------------------------
+
+@override
+Future<void> setMacroMode(bool enabled) async {
+  if (_useNativeIOSCamera) {
+    await _proChannel.invokeMethod<void>(
+      'setMacroMode',
+      enabled,
+    );
+  }
+}
+
+@override
+Future<CameraMacroState> getMacroState() async {
+  if (!_useNativeIOSCamera) {
+    return const CameraMacroState(
+      enabled: false,
+      userDisabled: false,
+      available: false,
+    );
+  }
+
+  final result =
+      await _proChannel.invokeMethod<Map<dynamic, dynamic>>(
+    'getMacroState',
+  );
+
+  return CameraMacroState(
+    enabled: result?['enabled'] == true,
+    userDisabled: result?['userDisabled'] == true,
+    available: result?['available'] == true,
+  );
+}
+
   // ---------------------------------------------------------------------------
   // Flash
   // ---------------------------------------------------------------------------

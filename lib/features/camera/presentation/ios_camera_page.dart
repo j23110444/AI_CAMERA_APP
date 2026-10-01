@@ -63,6 +63,12 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   bool _cameraInitializing = true;
   bool _cameraSwitching = false;
   bool _isUltraWideActive = false;
+
+  bool _macroEnabled = false;
+  bool _macroUserDisabled = false;
+  bool _macroAvailable = false;
+
+  Timer? _macroStateTimer;
   String? _cameraError;
   bool _proModeEnabled = false;
   bool _histogramEnabled = false;
@@ -73,6 +79,7 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   double _manualFocus = 0.5;
   String _whiteBalance = '自動';
   int _kelvin = 5200;
+
 
   // ============================================================
   // AI 候選照片
@@ -299,20 +306,68 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   }
 }
   
-  @override
+ @override
   void initState() {
     super.initState();
+
     _loadSavedImageLists();
+
     _metricsSubscription = _cameraAdapter.metrics.listen((metrics) {
-      if (mounted) setState(() => _cameraMetrics = metrics);
+      if (mounted) {
+        setState(() => _cameraMetrics = metrics);
+      }
     });
-    _accelerometerSubscription = accelerometerEventStream().listen((event) {
+
+    _accelerometerSubscription =
+        accelerometerEventStream().listen((event) {
       if (!mounted) return;
-      final angle = math.atan2(event.y, event.x) + math.pi / 2;
+
+      final angle =
+          math.atan2(event.y, event.x) + math.pi / 2;
+
       setState(() => _levelAngle = angle);
     });
+
     _initializeCamera();
+
+    _startMacroStateMonitor();
   }
+
+  void _startMacroStateMonitor() {
+  _macroStateTimer?.cancel();
+
+  _macroStateTimer = Timer.periodic(
+    const Duration(milliseconds: 300),
+    (_) async {
+      if (!mounted ||
+          _cameraInitializing ||
+          _cameraSwitching) {
+        return;
+      }
+
+      try {
+        final state =
+            await _cameraAdapter.getMacroState();
+
+        if (!mounted) return;
+
+        if (_macroEnabled != state.enabled ||
+            _macroUserDisabled != state.userDisabled ||
+            _macroAvailable != state.available) {
+          setState(() {
+            _macroEnabled = state.enabled;
+            _macroUserDisabled = state.userDisabled;
+            _macroAvailable = state.available;
+          });
+        }
+      } catch (e) {
+        debugPrint(
+          '⚠️ Macro state check failed: $e',
+        );
+      }
+    },
+  );
+}
 
   Future<void> _initializeCamera() async {
     try {
@@ -396,6 +451,71 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
     }
   }
 
+  Future<void> _toggleMacroControl() async {
+    if (_cameraSwitching ||
+        _cameraInitializing ||
+        !_macroAvailable) {
+      return;
+    }
+
+    if (_macroUserDisabled) {
+      // 重新允許自動 Macro。
+      try {
+        await _cameraAdapter.setMacroMode(true);
+
+        if (!mounted) return;
+
+        setState(() {
+          _macroUserDisabled = false;
+        });
+
+        _showAiTip('🌼 已重新啟用微距自動控制');
+      } catch (e) {
+        if (mounted) {
+          _showAiTip('⚠️ 無法重新啟用微距：$e');
+        }
+      }
+
+      return;
+    }
+
+    // 使用者主動關閉 Macro。
+    try {
+      setState(() {
+        _cameraSwitching = true;
+      });
+
+      await _cameraAdapter.setMacroMode(false);
+
+      if (!mounted) return;
+
+      setState(() {
+        _macroEnabled = false;
+        _macroUserDisabled = true;
+
+        // Macro 不應等同 0.5x。
+        // 關閉 Macro 後回到標準 Wide。
+        _zoomLevel = 1.0;
+        _isUltraWideActive = false;
+
+        _focusPoint = null;
+        _isFocusVisible = false;
+        _isAeAfLocked = false;
+      });
+
+      _showAiTip('🌼 微距已關閉');
+    } catch (e) {
+      if (mounted) {
+        _showAiTip('⚠️ 微距關閉失敗：$e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cameraSwitching = false;
+        });
+      }
+    }
+  }
   
 Future<void> _loadSavedImageLists() async {
   
@@ -571,13 +691,18 @@ Future<void> _loadSavedImageLists() async {
     _aiTipTimer?.cancel();
     _focusTimer?.cancel();
     _longPressActivationTimer?.cancel();
+    _macroStateTimer?.cancel();
+
     _metricsSubscription?.cancel();
     _accelerometerSubscription?.cancel();
+
     _videoPlayerController?.dispose();
     _cameraAdapter.dispose();
     _promptController.dispose();
+
     _recordedVideoPreviewController?.dispose();
     _recordedVideoPreviewController = null;
+
     super.dispose();
   }
 
@@ -5557,7 +5682,14 @@ bool _isLivePhoto(String photoPath) {
                 ),
               ),          
             ),
-
+            if (!_isRecording &&
+                _activeUploadedVideo == null &&
+                _currentMode != '影片')
+              Positioned(
+                left: 18,
+                bottom: 145,
+                child: _buildMacroControl(),
+              ),
 
                 if (_effectDebugMessage.isNotEmpty)
                 Positioned(
@@ -7121,13 +7253,51 @@ bool _isLivePhoto(String photoPath) {
     );
   }
 
+  Widget _buildMacroControl() {
+  // 沒有 Ultra Wide 就完全不顯示。
+  if (!_macroAvailable) {
+    return const SizedBox.shrink();
+  }
+
+  // Macro 自動啟動：
+  // 黃色小花。
+  final bool isActive = _macroEnabled;
+
+  // 使用者手動關閉：
+  // 灰色小花 + 斜線。
+  final bool isDisabled = _macroUserDisabled;
+
+  return GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: _toggleMacroControl,
+    child: SizedBox(
+      width: 52,
+      height: 52,
+      child: Center(
+        child: CustomPaint(
+          size: const Size(32, 32),
+          painter: MacroFlowerPainter(
+            color: isActive
+                ? Colors.yellowAccent
+                : Colors.white54,
+            disabled: isDisabled,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+
   Widget _buildLensLabelButton(String label, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Text(
         label,
         style: TextStyle(
-          color: _isUltraWideActive ? Colors.yellowAccent : Colors.white60,
+          color: _isUltraWideActive && !_macroEnabled
+            ? Colors.yellowAccent
+            : Colors.white60,
           fontSize: 17,
           fontWeight: FontWeight.w600,
         ),
@@ -7689,5 +7859,79 @@ class _HistogramPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _HistogramPainter oldDelegate) {
     return oldDelegate.bins != bins;
+  }
+
+}
+
+class MacroFlowerPainter extends CustomPainter {
+  final Color color;
+  final bool disabled;
+
+  MacroFlowerPainter({
+    required this.color,
+    required this.disabled,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(
+      size.width / 2,
+      size.height / 2,
+    );
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+
+    const int petalCount = 6;
+    const double radius = 7.5;
+
+    // 六片花瓣
+    for (int i = 0; i < petalCount; i++) {
+      final angle = (math.pi * 2 / petalCount) * i;
+
+      final petalCenter = Offset(
+        center.dx + math.cos(angle) * 5.5,
+        center.dy + math.sin(angle) * 5.5,
+      );
+
+      canvas.drawCircle(
+        petalCenter,
+        radius,
+        paint,
+      );
+    }
+
+    // 中心
+    canvas.drawCircle(
+      center,
+      3.0,
+      paint,
+    );
+
+    // 關閉狀態的斜線
+    if (disabled) {
+      final slashPaint = Paint()
+        ..color = Colors.white70
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0
+        ..strokeCap = StrokeCap.round;
+
+      canvas.drawLine(
+        const Offset(5, 27),
+        const Offset(27, 5),
+        slashPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(
+    covariant MacroFlowerPainter oldDelegate,
+  ) {
+    return oldDelegate.color != color ||
+        oldDelegate.disabled != disabled;
   }
 }

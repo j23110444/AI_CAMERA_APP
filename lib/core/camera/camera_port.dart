@@ -1,6 +1,19 @@
 import '../domain/models.dart';
 import 'camera_metrics.dart';
 
+
+class CameraMacroState {
+  final bool enabled;
+  final bool userDisabled;
+  final bool available;
+
+  const CameraMacroState({
+    required this.enabled,
+    required this.userDisabled,
+    required this.available,
+  });
+}
+
 class LivePhotoCapture {
   final String photoPath;
   final String videoPath;
@@ -49,6 +62,9 @@ abstract class CameraPort {
   Future<void> setFocusPoint(double x, double y);
   Future<void> setFocusLocked(bool locked);
   Future<void> setFlashMode(String mode);
+
+  Future<void> setMacroMode(bool enabled);
+  Future<CameraMacroState> getMacroState();
 
   /// 真正拍攝一張照片。
   Future<String> capturePhoto();

@@ -347,6 +347,23 @@ case "stopVideoRecording":
 
         result(nil)
 
+
+      // MARK: - Macro
+
+      case "setMacroMode":
+        let enabled =
+          (call.arguments as? NSNumber)?.boolValue ?? true
+
+        try cameraManager.setMacroMode(
+          enabled: enabled
+        )
+
+        result(nil)
+
+      case "getMacroState":
+        result(
+          cameraManager.macroState()
+        )
       // MARK: - Exposure
 
       case "setExposureBias":

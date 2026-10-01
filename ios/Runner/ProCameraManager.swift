@@ -19,6 +19,21 @@ final class ProCameraManager: NSObject {
 
   private var currentPhotoFlashMode: AVCaptureDevice.FlashMode = .off
 
+  // MARK: - Macro Mode
+
+  private var isMacroEnabled = false
+  private var isMacroUserDisabled = false
+
+  private var macroMonitorTimer: Timer?
+  private var macroNearCount = 0
+
+  // 第一版實機校正值。
+  // lensPosition 越接近 1，代表越靠近最近對焦端。
+  private let macroNearThreshold: Float = 0.65
+
+  // 必須連續達標數次，避免瞬間 focus hunting 誤觸發。
+  private let macroConfirmSamples = 3
+
   // MARK: - Outputs
 
   let photoOutput = AVCapturePhotoOutput()
@@ -128,6 +143,10 @@ final class ProCameraManager: NSObject {
       }
 
       self.session.startRunning()
+
+      DispatchQueue.main.async { [weak self] in
+        self?.startMacroMonitor()
+      }
     }
   }
 
@@ -220,6 +239,7 @@ final class ProCameraManager: NSObject {
     currentInput = newInput
     currentPosition = position
     currentLensType = lensType
+    
 
     if photoOutput.isLivePhotoCaptureSupported {
         photoOutput.isLivePhotoCaptureEnabled = true
@@ -395,6 +415,10 @@ final class ProCameraManager: NSObject {
     currentInput = newInput
     currentPosition = position
     currentLensType = lensType
+    
+    // 一般手動切鏡頭不視為 Macro 自動觸發。
+    isMacroEnabled = false
+    macroNearCount = 0
 
     configureConnection()
 
@@ -419,6 +443,188 @@ final class ProCameraManager: NSObject {
         )
     }
   }
+
+
+// MARK: - Macro Mode
+
+/// 開啟 / 關閉 Macro 自動控制。
+///
+/// Macro 實際使用 Ultra Wide 鏡頭的近距離對焦能力，
+/// 不等同於 UI 的 0.5x 變焦。
+func setMacroMode(enabled: Bool) throws {
+  isMacroUserDisabled = !enabled
+  macroNearCount = 0
+
+  if !enabled {
+    isMacroEnabled = false
+
+    // 如果目前正處於 Macro Ultra Wide，
+    // 點擊關閉後立即回到一般 Wide。
+    if currentLensType == "ultraWide" {
+      try selectCamera(
+        position: .back,
+        lensType: "wide"
+      )
+    }
+
+    return
+  }
+
+  // 重新允許自動 Macro。
+  // 不立即切鏡頭，等待下一次近距離偵測。
+  isMacroEnabled = false
+}
+
+func macroState() -> [String: Any] {
+  return [
+    "enabled": isMacroEnabled,
+    "userDisabled": isMacroUserDisabled,
+    "available":
+      findCamera(
+        position: .back,
+        lensType: "ultraWide"
+      ) != nil
+  ]
+}
+
+/// 定期檢查 Wide 鏡頭目前的對焦位置。
+private func startMacroMonitor() {
+  macroMonitorTimer?.invalidate()
+
+  DispatchQueue.main.async { [weak self] in
+    guard let self = self else {
+      return
+    }
+
+    self.macroMonitorTimer =
+      Timer.scheduledTimer(
+        withTimeInterval: 0.20,
+        repeats: true
+      ) { [weak self] _ in
+        self?.checkMacroFocusState()
+      }
+  }
+}
+
+private func checkMacroFocusState() {
+  // 只處理後鏡頭。
+  guard currentPosition == .back else {
+    macroNearCount = 0
+    return
+  }
+
+  // 使用者手動關閉 Macro。
+  guard !isMacroUserDisabled else {
+    macroNearCount = 0
+    return
+  }
+
+  // 已經在 Macro。
+  guard !isMacroEnabled else {
+    macroNearCount = 0
+    return
+  }
+
+  // 必須目前是一般 Wide。
+  guard currentLensType == "wide",
+        let device = selectedDevice else {
+    macroNearCount = 0
+    return
+  }
+
+  let lensPosition = device.lensPosition
+
+  if lensPosition >= macroNearThreshold {
+    macroNearCount += 1
+  } else {
+    macroNearCount = 0
+  }
+
+  guard macroNearCount >= macroConfirmSamples else {
+    return
+  }
+
+  macroNearCount = 0
+
+  // 裝置沒有 Ultra Wide 就不觸發。
+  guard findCamera(
+    position: .back,
+    lensType: "ultraWide"
+  ) != nil else {
+    return
+  }
+
+  do {
+    try selectCameraForMacro()
+  } catch {
+    print(
+      "⚠️ Macro 自動切換失敗:",
+      error.localizedDescription
+    )
+  }
+}
+
+/// Macro 專用鏡頭切換。
+///
+/// 和一般 0.5x 按鈕分開，
+/// 因此 Macro 不會把 Flutter 的 zoomLevel 改成 0.5。
+private func selectCameraForMacro() throws {
+  guard let device = findCamera(
+    position: .back,
+    lensType: "ultraWide"
+  ) else {
+    throw CameraManagerError.cameraNotFound(
+      position: .back,
+      lensType: "ultraWide"
+    )
+  }
+
+  session.beginConfiguration()
+
+  defer {
+    session.commitConfiguration()
+  }
+
+  if let oldInput = currentInput {
+    session.removeInput(oldInput)
+    currentInput = nil
+  }
+
+  let newInput: AVCaptureDeviceInput
+
+  do {
+    newInput = try AVCaptureDeviceInput(
+      device: device
+    )
+  } catch {
+    throw CameraManagerError.inputCreationFailed(
+      error.localizedDescription
+    )
+  }
+
+  guard session.canAddInput(newInput) else {
+    throw CameraManagerError.cannotAddInput
+  }
+
+  session.addInput(newInput)
+
+  currentInput = newInput
+  currentPosition = .back
+  currentLensType = "ultraWide"
+
+  // 這是 Macro 狀態，不是 0.5x UI zoom。
+  isMacroEnabled = true
+
+  configureConnection()
+
+  if photoOutput.isLivePhotoCaptureSupported {
+    photoOutput.isLivePhotoCaptureEnabled = true
+    photoOutput.isLivePhotoAutoTrimmingEnabled = true
+  }
+
+  print("🌼 Macro automatically enabled")
+}
+
   // MARK: - Selected Device
 
   private var selectedDevice: AVCaptureDevice? {
