@@ -25,14 +25,6 @@ final class ProCameraManager: NSObject {
   private var isMacroUserDisabled = false
 
   private var macroMonitorTimer: Timer?
-  private var macroNearCount = 0
-
-  // 第一版實機校正值。
-  // lensPosition 越接近 1，代表越靠近最近對焦端。
-  private let macroNearThreshold: Float = 0.65
-
-  // 必須連續達標數次，避免瞬間 focus hunting 誤觸發。
-  private let macroConfirmSamples = 3
 
   // MARK: - Outputs
 
@@ -77,7 +69,10 @@ final class ProCameraManager: NSObject {
     lensType: String = "wide"
   ) throws {
 
-    let status = AVCaptureDevice.authorizationStatus(for: .video)
+    let status =
+      AVCaptureDevice.authorizationStatus(
+        for: .video
+      )
 
     switch status {
 
@@ -86,7 +81,9 @@ final class ProCameraManager: NSObject {
 
     case .notDetermined:
 
-      AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+      AVCaptureDevice.requestAccess(
+        for: .video
+      ) { [weak self] granted in
 
         guard let self = self else {
           return
@@ -100,11 +97,14 @@ final class ProCameraManager: NSObject {
         DispatchQueue.main.async {
 
           do {
+
             try self.start(
               position: position,
               lensType: lensType
             )
+
           } catch {
+
             print(
               "Camera start failed: \(error)"
             )
@@ -154,6 +154,10 @@ final class ProCameraManager: NSObject {
 
   func stop() {
 
+    // 停止 Macro 狀態監控
+    macroMonitorTimer?.invalidate()
+    macroMonitorTimer = nil
+
     guard session.isRunning else {
       return
     }
@@ -175,15 +179,41 @@ final class ProCameraManager: NSObject {
     lensType: String
   ) throws {
 
-    guard let device = findCamera(
-      position: position,
-      lensType: lensType
-    ) else {
+    let device: AVCaptureDevice
 
-      throw CameraManagerError.cameraNotFound(
-        position: position,
-        lensType: lensType
+    // ------------------------------------------------------------
+    // Wide 優先使用 Virtual Camera
+    // ------------------------------------------------------------
+
+    if lensType == "wide",
+       let virtualDevice =
+        findVirtualCamera(
+          position: position
+        ) {
+
+      device = virtualDevice
+
+      print(
+        "📷 Using Virtual Camera:",
+        virtualDevice.localizedName
       )
+
+    } else {
+
+      guard let physicalDevice =
+        findCamera(
+          position: position,
+          lensType: lensType
+        )
+      else {
+
+        throw CameraManagerError.cameraNotFound(
+          position: position,
+          lensType: lensType
+        )
+      }
+
+      device = physicalDevice
     }
 
     session.beginConfiguration()
@@ -219,9 +249,10 @@ final class ProCameraManager: NSObject {
 
     do {
 
-      newInput = try AVCaptureDeviceInput(
-        device: device
-      )
+      newInput =
+        try AVCaptureDeviceInput(
+          device: device
+        )
 
     } catch {
 
@@ -239,15 +270,30 @@ final class ProCameraManager: NSObject {
     currentInput = newInput
     currentPosition = position
     currentLensType = lensType
-    
+
+    // ------------------------------------------------------------
+    // Configure Virtual Camera
+    //
+    // Macro 開啟 → AUTO
+    // Macro 關閉 → LOCKED
+    // ------------------------------------------------------------
+
+    if device.isVirtualDevice {
+      try configureVirtualCamera(device)
+    }
+
+    // ------------------------------------------------------------
+    // Live Photo
+    // ------------------------------------------------------------
 
     if photoOutput.isLivePhotoCaptureSupported {
-        photoOutput.isLivePhotoCaptureEnabled = true
-        photoOutput.isLivePhotoAutoTrimmingEnabled = true
 
-        print(
-            "📸 Live Photo: re-enabled after camera switch"
-        )
+      photoOutput.isLivePhotoCaptureEnabled = true
+      photoOutput.isLivePhotoAutoTrimmingEnabled = true
+
+      print(
+        "📸 Live Photo: re-enabled after camera switch"
+      )
     }
 
     configureConnection()
@@ -258,37 +304,39 @@ final class ProCameraManager: NSObject {
 
     if !session.outputs.contains(photoOutput) {
 
-    guard session.canAddOutput(photoOutput) else {
+      guard session.canAddOutput(photoOutput) else {
         throw CameraManagerError.cannotAddPhotoOutput
+      }
+
+      session.addOutput(photoOutput)
     }
 
-    session.addOutput(photoOutput)
-      }
+    // ------------------------------------------------------------
+    // Live Photo
+    // ------------------------------------------------------------
 
-      // ------------------------------------------------------------
-      // Live Photo
-      // ------------------------------------------------------------
+    if photoOutput.isLivePhotoCaptureSupported {
 
-      if photoOutput.isLivePhotoCaptureSupported {
+      photoOutput.isLivePhotoCaptureEnabled = true
+      photoOutput.isLivePhotoAutoTrimmingEnabled = true
 
-          photoOutput.isLivePhotoCaptureEnabled = true
-          photoOutput.isLivePhotoAutoTrimmingEnabled = true
+      print(
+        "📸 Live Photo: enabled =",
+        photoOutput.isLivePhotoCaptureEnabled
+      )
 
-          print(
-              "📸 Live Photo: enabled =",
-              photoOutput.isLivePhotoCaptureEnabled
-          )
+    } else {
 
-      } else {
+      print(
+        "⚠️ Live Photo: NOT supported"
+      )
+    }
 
-          print("⚠️ Live Photo: NOT supported")
-      }
+    if #available(iOS 16.0, *) {
 
-      if #available(iOS 16.0, *) {
-
-          photoOutput.maxPhotoQualityPrioritization =
-              .quality
-      }
+      photoOutput.maxPhotoQualityPrioritization =
+        .quality
+    }
 
     // ------------------------------------------------------------
     // Video output
@@ -332,21 +380,30 @@ final class ProCameraManager: NSObject {
     lensType: String
   ) -> AVCaptureDevice? {
 
-    let deviceType: AVCaptureDevice.DeviceType
+    let deviceType:
+      AVCaptureDevice.DeviceType
 
     switch lensType {
 
     case "ultraWide":
-      deviceType = .builtInUltraWideCamera
+
+      deviceType =
+        .builtInUltraWideCamera
 
     case "telephoto":
-      deviceType = .builtInTelephotoCamera
+
+      deviceType =
+        .builtInTelephotoCamera
 
     case "wide":
-      deviceType = .builtInWideAngleCamera
+
+      deviceType =
+        .builtInWideAngleCamera
 
     default:
-      deviceType = .builtInWideAngleCamera
+
+      deviceType =
+        .builtInWideAngleCamera
     }
 
     return AVCaptureDevice.default(
@@ -356,6 +413,25 @@ final class ProCameraManager: NSObject {
     )
   }
 
+  // MARK: - Find Virtual Camera
+
+  private func findVirtualCamera(
+    position: AVCaptureDevice.Position
+  ) -> AVCaptureDevice? {
+
+    let discoverySession =
+      AVCaptureDevice.DiscoverySession(
+        deviceTypes: [
+          .builtInTripleCamera,
+          .builtInDualWideCamera
+        ],
+        mediaType: .video,
+        position: position
+      )
+
+    return discoverySession.devices.first
+  }
+
   // MARK: - Select Camera
 
   func selectCamera(
@@ -363,15 +439,41 @@ final class ProCameraManager: NSObject {
     lensType: String
   ) throws {
 
-    guard let device = findCamera(
-      position: position,
-      lensType: lensType
-    ) else {
+    let device: AVCaptureDevice
 
-      throw CameraManagerError.cameraNotFound(
-        position: position,
-        lensType: lensType
+    // ------------------------------------------------------------
+    // Wide → Virtual Camera
+    // ------------------------------------------------------------
+
+    if lensType == "wide",
+       let virtualDevice =
+        findVirtualCamera(
+          position: position
+        ) {
+
+      device = virtualDevice
+
+      print(
+        "📷 Using Virtual Camera:",
+        virtualDevice.localizedName
       )
+
+    } else {
+
+      guard let physicalDevice =
+        findCamera(
+          position: position,
+          lensType: lensType
+        )
+      else {
+
+        throw CameraManagerError.cameraNotFound(
+          position: position,
+          lensType: lensType
+        )
+      }
+
+      device = physicalDevice
     }
 
     session.beginConfiguration()
@@ -380,7 +482,9 @@ final class ProCameraManager: NSObject {
       session.commitConfiguration()
     }
 
+    // ------------------------------------------------------------
     // Remove old input
+    // ------------------------------------------------------------
 
     if let oldInput = currentInput {
 
@@ -389,15 +493,18 @@ final class ProCameraManager: NSObject {
       currentInput = nil
     }
 
+    // ------------------------------------------------------------
     // Create new input
+    // ------------------------------------------------------------
 
     let newInput: AVCaptureDeviceInput
 
     do {
 
-      newInput = try AVCaptureDeviceInput(
-        device: device
-      )
+      newInput =
+        try AVCaptureDeviceInput(
+          device: device
+        )
 
     } catch {
 
@@ -416,230 +523,329 @@ final class ProCameraManager: NSObject {
     currentPosition = position
     currentLensType = lensType
 
-    // 一般手動切鏡頭不視為 Macro 自動觸發。
-    isMacroEnabled = false
-    macroNearCount = 0
+    // ------------------------------------------------------------
+    // Virtual Camera
+    //
+    // configureVirtualCamera() 會依照
+    // isMacroUserDisabled 決定 AUTO / LOCKED。
+    // ------------------------------------------------------------
+
+    if device.isVirtualDevice {
+      try configureVirtualCamera(device)
+    }
+
+    // ------------------------------------------------------------
+    // 切換到實體鏡頭時 Macro 狀態失效
+    // ------------------------------------------------------------
+
+    if lensType != "wide" {
+      isMacroEnabled = false
+    }
 
     configureConnection()
 
     // ------------------------------------------------------------
-    // 重新確認 Live Photo 狀態
+    // Live Photo
     // ------------------------------------------------------------
 
     if photoOutput.isLivePhotoCaptureSupported {
-        photoOutput.isLivePhotoCaptureEnabled = true
-        photoOutput.isLivePhotoAutoTrimmingEnabled = true
 
-        print(
-            "📸 Live Photo after camera switch:",
-            photoOutput.isLivePhotoCaptureEnabled
-        )
+      photoOutput.isLivePhotoCaptureEnabled = true
+      photoOutput.isLivePhotoAutoTrimmingEnabled = true
+
+      print(
+        "📸 Live Photo after camera switch:",
+        photoOutput.isLivePhotoCaptureEnabled
+      )
+
     } else {
-        photoOutput.isLivePhotoCaptureEnabled = false
 
-        print(
-            "⚠️ Live Photo 不支援目前鏡頭：",
-            lensType
-        )
-    }
-  }
+      photoOutput.isLivePhotoCaptureEnabled = false
 
-
-// MARK: - Macro Mode
-
-/// 開啟 / 關閉 Macro 自動控制。
-///
-/// Macro 實際使用 Ultra Wide 鏡頭的近距離對焦能力，
-/// 不等同於 UI 的 0.5x 變焦。
-func setMacroMode(enabled: Bool) throws {
-  isMacroUserDisabled = !enabled
-  macroNearCount = 0
-
-  if !enabled {
-    isMacroEnabled = false
-
-    // 如果目前正處於 Macro Ultra Wide，
-    // 點擊關閉後立即回到一般 Wide。
-    if currentLensType == "ultraWide" {
-      try selectCamera(
-        position: .back,
-        lensType: "wide"
+      print(
+        "⚠️ Live Photo 不支援目前鏡頭：",
+        lensType
       )
     }
-
-    return
   }
 
-  // 重新允許自動 Macro。
-  // 不立即切鏡頭，等待下一次近距離偵測。
-  isMacroEnabled = false
-}
+  // MARK: - Macro Mode
 
-func macroState() -> [String: Any] {
-  return [
-    "enabled": isMacroEnabled,
-    "userDisabled": isMacroUserDisabled,
-    "available":
-      findCamera(
-        position: .back,
-        lensType: "ultraWide"
-      ) != nil
-  ]
-}
+  /// 是否存在可用的 Virtual Camera。
+  private var macroVirtualCameraAvailable: Bool {
 
-/// 定期檢查 Wide 鏡頭目前的對焦位置。
-private func startMacroMonitor() {
-  macroMonitorTimer?.invalidate()
+    findVirtualCamera(
+      position: .back
+    ) != nil
+  }
 
-  DispatchQueue.main.async { [weak self] in
-    guard let self = self else {
+  /// 設定 Virtual Camera 的 constituent switching。
+  ///
+  /// Macro 開啟：
+  ///     .auto
+  ///
+  /// Macro 關閉：
+  ///     .locked
+  ///
+  /// 這樣 Macro UI 狀態與實際 Virtual Camera
+  /// 的自動切換狀態保持一致。
+  private func configureVirtualCamera(
+    _ device: AVCaptureDevice
+  ) throws {
+
+    guard device.isVirtualDevice else {
       return
     }
 
-    self.macroMonitorTimer =
-      Timer.scheduledTimer(
-        withTimeInterval: 0.20,
-        repeats: true
-      ) { [weak self] _ in
-        self?.checkMacroFocusState()
-      }
-  }
-}
+    try device.lockForConfiguration()
 
-private func checkMacroFocusState() {
-  // 只處理後鏡頭。
-  guard currentPosition == .back else {
-    macroNearCount = 0
-    return
-  }
-
-  // 使用者手動關閉 Macro。
-  guard !isMacroUserDisabled else {
-    macroNearCount = 0
-    return
-  }
-
-  // 已經在 Macro。
-  guard !isMacroEnabled else {
-    macroNearCount = 0
-    return
-  }
-
-  // 必須目前是一般 Wide。
-  guard currentLensType == "wide",
-        let device = selectedDevice else {
-    macroNearCount = 0
-    return
-  }
-
-  let lensPosition = device.lensPosition
-
-  if lensPosition >= macroNearThreshold {
-    macroNearCount += 1
-  } else {
-    macroNearCount = 0
-  }
-
-  guard macroNearCount >= macroConfirmSamples else {
-    return
-  }
-
-  macroNearCount = 0
-
-  // 裝置沒有 Ultra Wide 就不觸發。
-  guard findCamera(
-    position: .back,
-    lensType: "ultraWide"
-  ) != nil else {
-    return
-  }
-
-  do {
-    try selectCameraForMacro()
-  } catch {
-    print(
-      "⚠️ Macro 自動切換失敗:",
-      error.localizedDescription
-    )
-  }
-}
-
-/// Macro 專用鏡頭切換。
-///
-/// 和一般 0.5x 按鈕分開，
-/// 因此 Macro 不會把 Flutter 的 zoomLevel 改成 0.5。
-private func selectCameraForMacro() throws {
-  guard let device = findCamera(
-    position: .back,
-    lensType: "ultraWide"
-  ) else {
-    throw CameraManagerError.cameraNotFound(
-      position: .back,
-      lensType: "ultraWide"
-    )
-  }
-
-  session.beginConfiguration()
-
-  defer {
-    session.commitConfiguration()
-  }
-
-  if let oldInput = currentInput {
-    session.removeInput(oldInput)
-    currentInput = nil
-  }
-
-  let newInput: AVCaptureDeviceInput
-
-  do {
-    newInput = try AVCaptureDeviceInput(
-      device: device
-    )
-  } catch {
-    throw CameraManagerError.inputCreationFailed(
-      error.localizedDescription
-    )
-  }
-
-  guard session.canAddInput(newInput) else {
-    throw CameraManagerError.cannotAddInput
-  }
-
-  session.addInput(newInput)
-
-  currentInput = newInput
-  currentPosition = .back
-  currentLensType = "ultraWide"
-
-  isMacroEnabled = true
-
-  configureConnection()
-
-  // Macro 使用 Ultra Wide 後，重新設定近距離對焦。
-  do {
-      try device.lockForConfiguration()
-
-      if device.isFocusModeSupported(.continuousAutoFocus) {
-          device.focusMode = .continuousAutoFocus
-      }
-
-      if device.isExposureModeSupported(.continuousAutoExposure) {
-          device.exposureMode = .continuousAutoExposure
-      }
-
+    defer {
       device.unlockForConfiguration()
-  } catch {
-      print("⚠️ Macro 對焦設定失敗: \(error.localizedDescription)")
+    }
+
+    guard
+      device.primaryConstituentDeviceSwitchingBehavior
+        != .unsupported
+    else {
+
+      print(
+        "⚠️ Virtual Camera does not support constituent switching"
+      )
+
+      return
+    }
+
+    if isMacroUserDisabled {
+
+      device.setPrimaryConstituentDeviceSwitchingBehavior(
+        .locked,
+        restrictedSwitchingBehaviorConditions: []
+      )
+
+      print(
+        "📷 Virtual Camera switching = LOCKED"
+      )
+
+    } else {
+
+      device.setPrimaryConstituentDeviceSwitchingBehavior(
+        .auto,
+        restrictedSwitchingBehaviorConditions: []
+      )
+
+      print(
+        "📷 Virtual Camera switching = AUTO"
+      )
+    }
   }
 
-  if photoOutput.isLivePhotoCaptureSupported {
-    photoOutput.isLivePhotoCaptureEnabled = true
-    photoOutput.isLivePhotoAutoTrimmingEnabled = true
+  // MARK: Macro Control
+
+  func setMacroMode(
+    enabled: Bool
+  ) throws {
+
+    isMacroUserDisabled = !enabled
+
+    // ------------------------------------------------------------
+    // Macro 只存在於後置 Wide Virtual Camera
+    // ------------------------------------------------------------
+
+    guard
+      currentPosition == .back,
+      currentLensType == "wide",
+      let device = selectedDevice,
+      device.isVirtualDevice
+    else {
+
+      isMacroEnabled = false
+
+      print(
+        "🌼 Macro unavailable on current camera"
+      )
+
+      return
+    }
+
+    try device.lockForConfiguration()
+
+    defer {
+      device.unlockForConfiguration()
+    }
+
+    guard
+      device.primaryConstituentDeviceSwitchingBehavior
+        != .unsupported
+    else {
+
+      isMacroEnabled = false
+
+      print(
+        "⚠️ Macro switching unsupported"
+      )
+
+      return
+    }
+
+    if enabled {
+
+      // ----------------------------------------------------------
+      // Macro ON
+      // ----------------------------------------------------------
+      //
+      // 允許 Virtual Camera 自動選擇 constituent。
+      //
+      // 靠近物體時，AVFoundation 可以自行切換
+      // 至適合近距離對焦的 Ultra Wide constituent。
+      // ----------------------------------------------------------
+
+      device.setPrimaryConstituentDeviceSwitchingBehavior(
+        .auto,
+        restrictedSwitchingBehaviorConditions: []
+      )
+
+      isMacroUserDisabled = false
+
+      print(
+        "🌼 Macro AUTO switching enabled"
+      )
+
+    } else {
+
+      // ----------------------------------------------------------
+      // Macro OFF
+      // ----------------------------------------------------------
+      //
+      // 保留 Virtual Camera。
+      // 但是禁止自動 constituent switching。
+      // ----------------------------------------------------------
+
+      device.setPrimaryConstituentDeviceSwitchingBehavior(
+        .locked,
+        restrictedSwitchingBehaviorConditions: []
+      )
+
+      isMacroEnabled = false
+
+      print(
+        "🌼 Macro AUTO switching disabled"
+      )
+    }
   }
 
-  print("🌼 Macro automatically enabled")
-}
+  // MARK: Macro State
+
+  func macroState() -> [String: Any] {
+
+    return [
+      "enabled":
+        isMacroEnabled,
+
+      "userDisabled":
+        isMacroUserDisabled,
+
+      "available":
+        macroVirtualCameraAvailable
+    ]
+  }
+
+  // MARK: Macro Monitor
+
+  private func startMacroMonitor() {
+
+    macroMonitorTimer?.invalidate()
+
+    DispatchQueue.main.async { [weak self] in
+
+      guard let self = self else {
+        return
+      }
+
+      self.macroMonitorTimer =
+        Timer.scheduledTimer(
+          withTimeInterval: 0.30,
+          repeats: true
+        ) { [weak self] _ in
+
+          self?.updateMacroState()
+        }
+    }
+  }
+
+  private func updateMacroState() {
+
+    // ------------------------------------------------------------
+    // 使用者手動關閉 Macro
+    // ------------------------------------------------------------
+
+    guard !isMacroUserDisabled else {
+
+      isMacroEnabled = false
+
+      return
+    }
+
+    // ------------------------------------------------------------
+    // 必須是後置 Wide Virtual Camera
+    // ------------------------------------------------------------
+
+    guard
+      currentPosition == .back,
+      currentLensType == "wide",
+      let device = selectedDevice,
+      device.isVirtualDevice
+    else {
+
+      isMacroEnabled = false
+
+      return
+    }
+
+    // ------------------------------------------------------------
+    // 取得目前實際使用的 constituent
+    // ------------------------------------------------------------
+
+    guard
+      let active =
+        device.activePrimaryConstituent
+    else {
+
+      return
+    }
+
+    let isUltraWide =
+      active.deviceType ==
+        .builtInUltraWideCamera
+
+    // ------------------------------------------------------------
+    // Ultra Wide constituent = Macro Active
+    // ------------------------------------------------------------
+
+    if isUltraWide {
+
+      if !isMacroEnabled {
+
+        isMacroEnabled = true
+
+        print(
+          "🌼 Macro constituent active:",
+          active.localizedName
+        )
+      }
+
+    } else {
+
+      if isMacroEnabled {
+
+        isMacroEnabled = false
+
+        print(
+          "📷 Macro constituent inactive:",
+          active.localizedName
+        )
+      }
+    }
+  }
 
   // MARK: - Selected Device
 
@@ -649,9 +855,11 @@ private func selectCameraForMacro() throws {
 
   // MARK: - Capture Photo
 
-  private var photoCaptureDelegate: PhotoCaptureDelegate?
+  private var photoCaptureDelegate:
+    PhotoCaptureDelegate?
 
-  private var movieRecordingDelegate: MovieRecordingDelegate?
+  private var movieRecordingDelegate:
+    MovieRecordingDelegate?
 
   func capturePhoto() async throws -> String {
 
@@ -669,16 +877,18 @@ private func selectCameraForMacro() throws {
       AVVideoCodecType.jpeg
     ) {
 
-      settings = AVCapturePhotoSettings(
-        format: [
-          AVVideoCodecKey:
-            AVVideoCodecType.jpeg
-        ]
-      )
+      settings =
+        AVCapturePhotoSettings(
+          format: [
+            AVVideoCodecKey:
+              AVVideoCodecType.jpeg
+          ]
+        )
 
     } else {
 
-      settings = AVCapturePhotoSettings()
+      settings =
+        AVCapturePhotoSettings()
     }
 
     // ------------------------------------------------------------
@@ -687,7 +897,8 @@ private func selectCameraForMacro() throws {
 
     if photoOutput.maxPhotoQualityPrioritization == .quality {
 
-      settings.photoQualityPrioritization = .quality
+      settings.photoQualityPrioritization =
+        .quality
     }
 
     // ------------------------------------------------------------
@@ -700,7 +911,8 @@ private func selectCameraForMacro() throws {
          currentPhotoFlashMode
        ) {
 
-      settings.flashMode = currentPhotoFlashMode
+      settings.flashMode =
+        currentPhotoFlashMode
     }
 
     // ------------------------------------------------------------
@@ -721,11 +933,13 @@ private func selectCameraForMacro() throws {
           CheckedContinuation<String, Error>
       ) in
 
-      let delegate = PhotoCaptureDelegate(
-        continuation: continuation
-      )
+      let delegate =
+        PhotoCaptureDelegate(
+          continuation: continuation
+        )
 
-      photoCaptureDelegate = delegate
+      photoCaptureDelegate =
+        delegate
 
       photoOutput.capturePhoto(
         with: settings,
@@ -736,7 +950,7 @@ private func selectCameraForMacro() throws {
 
   // MARK: - Core Image Photo Effects
 
-func applyPhotoEffects(
+  func applyPhotoEffects(
     sourcePath: String,
     filter: String,
     paletteRed: Double,
@@ -745,62 +959,91 @@ func applyPhotoEffects(
     paletteOpacity: Double,
     exposure: Double,
     nightMode: Bool
-) throws -> String {
+  ) throws -> String {
 
-    let sourceURL = URL(
+    let sourceURL =
+      URL(
         fileURLWithPath: sourcePath
-    )
+      )
 
     guard FileManager.default.fileExists(
-        atPath: sourceURL.path
+      atPath: sourceURL.path
     ) else {
 
-        throw CameraManagerError.unsupported(
-            "找不到要套用特效的照片"
-        )
+      throw CameraManagerError.unsupported(
+        "找不到要套用特效的照片"
+      )
     }
 
     // ------------------------------------------------------------
     // 1. Load image
     // ------------------------------------------------------------
 
-    guard let inputImage = CIImage(
+    guard let inputImage =
+      CIImage(
         contentsOf: sourceURL,
         options: [
-            CIImageOption.applyOrientationProperty: true
+          CIImageOption.applyOrientationProperty: true
         ]
-    ) else {
+      )
+    else {
 
-        throw CameraManagerError.unsupported(
-            "Core Image 無法讀取照片"
-        )
+      throw CameraManagerError.unsupported(
+        "Core Image 無法讀取照片"
+      )
     }
 
-    let originalExtent = inputImage.extent
+    let originalExtent =
+      inputImage.extent
 
     guard !originalExtent.isEmpty else {
 
-        throw CameraManagerError.unsupported(
-            "原始照片範圍為空"
-        )
+      throw CameraManagerError.unsupported(
+        "原始照片範圍為空"
+      )
     }
 
-    var image = inputImage
+    var image =
+      inputImage
 
-    print("🎨 Core Image Photo Effects")
-    print("🎨 source:", sourcePath)
-    print("🎨 filter:", filter)
-    print("🎨 palette:",
-          paletteRed,
-          paletteGreen,
-          paletteBlue)
-    print("🎨 paletteOpacity:", paletteOpacity)
-    print("🎨 exposure:", exposure)
-    print("🎨 night:", nightMode)
+    print(
+      "🎨 Core Image Photo Effects"
+    )
 
-   
+    print(
+      "🎨 source:",
+      sourcePath
+    )
+
+    print(
+      "🎨 filter:",
+      filter
+    )
+
+    print(
+      "🎨 palette:",
+      paletteRed,
+      paletteGreen,
+      paletteBlue
+    )
+
+    print(
+      "🎨 paletteOpacity:",
+      paletteOpacity
+    )
+
+    print(
+      "🎨 exposure:",
+      exposure
+    )
+
+    print(
+      "🎨 night:",
+      nightMode
+    )
+
     // ------------------------------------------------------------
-    // 2. Filter：實際影像色彩處理
+    // 2. Filter
     // ------------------------------------------------------------
 
     func applyColorControls(
@@ -808,14 +1051,27 @@ func applyPhotoEffects(
       contrast: Float,
       brightness: Float
     ) {
-      let filter = CIFilter.colorControls()
-      filter.inputImage = image
-      filter.saturation = saturation
-      filter.contrast = contrast
-      filter.brightness = brightness
 
-      if let output = filter.outputImage {
-        image = output
+      let filter =
+        CIFilter.colorControls()
+
+      filter.inputImage =
+        image
+
+      filter.saturation =
+        saturation
+
+      filter.contrast =
+        contrast
+
+      filter.brightness =
+        brightness
+
+      if let output =
+        filter.outputImage {
+
+        image =
+          output
       }
     }
 
@@ -823,19 +1079,30 @@ func applyPhotoEffects(
       temperature: Float,
       tint: Float = 0
     ) {
-      let filter = CIFilter.temperatureAndTint()
-      filter.inputImage = image
-      filter.neutral = CIVector(
-        x: 6500,
-        y: 0
-      )
-      filter.targetNeutral = CIVector(
-        x: CGFloat(temperature),
-        y: CGFloat(tint)
-      )
 
-      if let output = filter.outputImage {
-        image = output
+      let filter =
+        CIFilter.temperatureAndTint()
+
+      filter.inputImage =
+        image
+
+      filter.neutral =
+        CIVector(
+          x: 6500,
+          y: 0
+        )
+
+      filter.targetNeutral =
+        CIVector(
+          x: CGFloat(temperature),
+          y: CGFloat(tint)
+        )
+
+      if let output =
+        filter.outputImage {
+
+        image =
+          output
       }
     }
 
@@ -843,34 +1110,49 @@ func applyPhotoEffects(
       shadows: Float,
       highlights: Float
     ) {
-      let filter = CIFilter.highlightShadowAdjust()
-      filter.inputImage = image
-      filter.shadowAmount = shadows
-      filter.highlightAmount = highlights
 
-      if let output = filter.outputImage {
-        image = output
+      let filter =
+        CIFilter.highlightShadowAdjust()
+
+      filter.inputImage =
+        image
+
+      filter.shadowAmount =
+        shadows
+
+      filter.highlightAmount =
+        highlights
+
+      if let output =
+        filter.outputImage {
+
+        image =
+          output
       }
     }
 
     switch filter {
 
     case "鮮明":
+
       applyColorControls(
         saturation: 1.22,
         contrast: 1.12,
         brightness: 0.01
       )
+
       applyHighlightShadow(
         shadows: 0.15,
         highlights: 0.92
       )
 
     case "溫暖":
+
       applyTemperature(
         temperature: 7200,
         tint: 4
       )
+
       applyColorControls(
         saturation: 1.08,
         contrast: 1.04,
@@ -878,10 +1160,12 @@ func applyPhotoEffects(
       )
 
     case "冷色":
+
       applyTemperature(
         temperature: 4300,
         tint: -3
       )
+
       applyColorControls(
         saturation: 1.04,
         contrast: 1.06,
@@ -889,44 +1173,54 @@ func applyPhotoEffects(
       )
 
     case "復古":
+
       applyColorControls(
         saturation: 0.78,
         contrast: 0.92,
         brightness: 0.035
       )
+
       applyHighlightShadow(
         shadows: 0.35,
         highlights: 0.85
       )
-      image = applyColorOverlay(
-        image: image,
-        red: 0.58,
-        green: 0.39,
-        blue: 0.23,
-        opacity: 0.07
-      )
+
+      image =
+        applyColorOverlay(
+          image: image,
+          red: 0.58,
+          green: 0.39,
+          blue: 0.23,
+          opacity: 0.07
+        )
 
     default:
       break
     }
 
     // ------------------------------------------------------------
-    // 3. Palette：自訂色彩調整
+    // 3. Palette
     // ------------------------------------------------------------
 
-    let clampedPaletteOpacity = min(
-      max(paletteOpacity, 0.0),
-      0.12
-    )
+    let clampedPaletteOpacity =
+      min(
+        max(
+          paletteOpacity,
+          0.0
+        ),
+        0.12
+      )
 
     if clampedPaletteOpacity > 0.001 {
-      image = applyColorOverlay(
-        image: image,
-        red: paletteRed,
-        green: paletteGreen,
-        blue: paletteBlue,
-        opacity: clampedPaletteOpacity
-      )
+
+      image =
+        applyColorOverlay(
+          image: image,
+          red: paletteRed,
+          green: paletteGreen,
+          blue: paletteBlue,
+          opacity: clampedPaletteOpacity
+        )
     }
 
     // ------------------------------------------------------------
@@ -935,24 +1229,26 @@ func applyPhotoEffects(
 
     if abs(exposure) > 0.001 {
 
-        let exposureFilter =
-            CIFilter.exposureAdjust()
+      let exposureFilter =
+        CIFilter.exposureAdjust()
 
-        exposureFilter.inputImage = image
+      exposureFilter.inputImage =
+        image
 
-        exposureFilter.ev =
-            Float(exposure)
+      exposureFilter.ev =
+        Float(exposure)
 
-        if let output =
-            exposureFilter.outputImage {
+      if let output =
+        exposureFilter.outputImage {
 
-            image = output
-        }
+        image =
+          output
+      }
 
-        print(
-            "🎨 Exposure applied:",
-            exposure
-        )
+      print(
+        "🎨 Exposure applied:",
+        exposure
+      )
     }
 
     // ------------------------------------------------------------
@@ -961,85 +1257,96 @@ func applyPhotoEffects(
 
     if nightMode {
 
-        let colorControls =
-            CIFilter.colorControls()
+      let colorControls =
+        CIFilter.colorControls()
 
-        colorControls.inputImage = image
-        colorControls.brightness = 0.08
-        colorControls.contrast = 1.02
-        colorControls.saturation = 1.04
+      colorControls.inputImage =
+        image
 
-        if let output =
-            colorControls.outputImage {
+      colorControls.brightness =
+        0.08
 
-            image = output
-        }
+      colorControls.contrast =
+        1.02
 
-        image = applyColorOverlay(
-            image: image,
-            red: 0.20,
-            green: 0.28,
-            blue: 0.55,
-            opacity: 0.06
+      colorControls.saturation =
+        1.04
+
+      if let output =
+        colorControls.outputImage {
+
+        image =
+          output
+      }
+
+      image =
+        applyColorOverlay(
+          image: image,
+          red: 0.20,
+          green: 0.28,
+          blue: 0.55,
+          opacity: 0.06
         )
 
-        print("🎨 Night Mode applied")
+      print(
+        "🎨 Night Mode applied"
+      )
     }
 
     // ------------------------------------------------------------
-    // 6. Crop back to original extent
+    // 6. Crop
     // ------------------------------------------------------------
 
     image =
-        image.cropped(
-            to: originalExtent
-        )
+      image.cropped(
+        to: originalExtent
+      )
 
     // ------------------------------------------------------------
-    // 7. Render as standard sRGB JPEG
+    // 7. Render sRGB JPEG
     // ------------------------------------------------------------
 
     guard let outputColorSpace =
-        CGColorSpace(
-            name: CGColorSpace.sRGB
-        )
+      CGColorSpace(
+        name: CGColorSpace.sRGB
+      )
     else {
 
-        throw CameraManagerError.unsupported(
-            "無法建立 sRGB 色彩空間"
-        )
+      throw CameraManagerError.unsupported(
+        "無法建立 sRGB 色彩空間"
+      )
     }
 
     guard let outputCGImage =
-        ciContext.createCGImage(
-            image,
-            from: originalExtent,
-            format: .RGBA8,
-            colorSpace: outputColorSpace
-        )
+      ciContext.createCGImage(
+        image,
+        from: originalExtent,
+        format: .RGBA8,
+        colorSpace: outputColorSpace
+      )
     else {
 
-        throw CameraManagerError.unsupported(
-            "Core Image 無法建立輸出影像"
-        )
+      throw CameraManagerError.unsupported(
+        "Core Image 無法建立輸出影像"
+      )
     }
 
     let outputImage =
-        UIImage(
-            cgImage: outputCGImage,
-            scale: 1.0,
-            orientation: .up
-        )
+      UIImage(
+        cgImage: outputCGImage,
+        scale: 1.0,
+        orientation: .up
+      )
 
     guard let jpegData =
-        outputImage.jpegData(
-            compressionQuality: 0.95
-        )
+      outputImage.jpegData(
+        compressionQuality: 0.95
+      )
     else {
 
-        throw CameraManagerError.unsupported(
-            "JPEG 編碼失敗"
-        )
+      throw CameraManagerError.unsupported(
+        "JPEG 編碼失敗"
+      )
     }
 
     // ------------------------------------------------------------
@@ -1047,96 +1354,97 @@ func applyPhotoEffects(
     // ------------------------------------------------------------
 
     let outputDirectory =
-        sourceURL.deletingLastPathComponent()
+      sourceURL.deletingLastPathComponent()
 
     let filename =
-        "processed_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+      "processed_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
 
     let outputURL =
-        outputDirectory.appendingPathComponent(
-            filename
-        )
+      outputDirectory.appendingPathComponent(
+        filename
+      )
 
     try jpegData.write(
-        to: outputURL,
-        options: .atomic
+      to: outputURL,
+      options: .atomic
     )
 
     print(
-        "🎨 Core Image output:",
-        outputURL.path
+      "🎨 Core Image output:",
+      outputURL.path
     )
 
     print(
-        "🎨 Output size:",
-        jpegData.count,
-        "bytes"
+      "🎨 Output size:",
+      jpegData.count,
+      "bytes"
     )
 
     return outputURL.path
-}
+  }
 
-// MARK: - Core Image Color Overlay
+  // MARK: - Core Image Color Overlay
 
-private func applyColorOverlay(
+  private func applyColorOverlay(
     image: CIImage,
     red: Double,
     green: Double,
     blue: Double,
     opacity: Double
-) -> CIImage {
+  ) -> CIImage {
 
     let clampedRed =
-        min(
-            max(red, 0.0),
-            1.0
-        )
+      min(
+        max(red, 0.0),
+        1.0
+      )
 
     let clampedGreen =
-        min(
-            max(green, 0.0),
-            1.0
-        )
+      min(
+        max(green, 0.0),
+        1.0
+      )
 
     let clampedBlue =
-        min(
-            max(blue, 0.0),
-            1.0
-        )
+      min(
+        max(blue, 0.0),
+        1.0
+      )
 
     let clampedOpacity =
-        min(
-            max(opacity, 0.0),
-            1.0
-        )
+      min(
+        max(opacity, 0.0),
+        1.0
+      )
 
     let color =
-        CIColor(
-            red: CGFloat(clampedRed),
-            green: CGFloat(clampedGreen),
-            blue: CGFloat(clampedBlue),
-            alpha: CGFloat(clampedOpacity)
-        )
+      CIColor(
+        red: CGFloat(clampedRed),
+        green: CGFloat(clampedGreen),
+        blue: CGFloat(clampedBlue),
+        alpha: CGFloat(clampedOpacity)
+      )
 
     let overlay =
-        CIImage(
-            color: color
-        ).cropped(
-            to: image.extent
-        )
+      CIImage(
+        color: color
+      ).cropped(
+        to: image.extent
+      )
 
     let compositingFilter =
-        CIFilter.sourceOverCompositing()
+      CIFilter.sourceOverCompositing()
 
     compositingFilter.inputImage =
-        overlay
+      overlay
 
     compositingFilter.backgroundImage =
-        image
+      image
 
-    return compositingFilter.outputImage ?? image
-}
-
+    return
+      compositingFilter.outputImage ??
+      image
+  }
 
   // MARK: - Video Recording
 
@@ -1152,11 +1460,6 @@ private func applyColorOverlay(
 
     session.beginConfiguration()
 
-    // 不需要移除 photoOutput。
-    //
-    // AVCapturePhotoOutput 可以與 MovieFileOutput 同時存在，
-    // 但 MovieFileOutput 存在期間 Live Photo 會被停用。
-
     guard session.canAddOutput(movieOutput) else {
 
       session.commitConfiguration()
@@ -1167,7 +1470,9 @@ private func applyColorOverlay(
     session.addOutput(movieOutput)
 
     guard let connection =
-      movieOutput.connection(with: .video)
+      movieOutput.connection(
+        with: .video
+      )
     else {
 
       session.removeOutput(movieOutput)
@@ -1222,7 +1527,8 @@ private func applyColorOverlay(
         manager: self
       )
 
-    movieRecordingDelegate = delegate
+    movieRecordingDelegate =
+      delegate
 
     movieOutput.startRecording(
       to: fileURL,
@@ -1235,7 +1541,8 @@ private func applyColorOverlay(
     )
   }
 
-  func stopVideoRecording() async throws -> String {
+  func stopVideoRecording()
+    async throws -> String {
 
     guard movieOutput.isRecording else {
       throw CameraManagerError.movieNotRecording
@@ -1264,43 +1571,47 @@ private func applyColorOverlay(
 
     sessionQueue.async { [weak self] in
 
-        guard let self = self else {
-            return
-        }
-
-        self.session.beginConfiguration()
-
-        if self.session.outputs.contains(
-            self.movieOutput
-        ) {
-
-            self.session.removeOutput(
-                self.movieOutput
-            )
-        }
-
-        // ----------------------------------------------------
-        // 影片錄影結束後重新啟用 Live Photo
-        // ----------------------------------------------------
-
-        if self.photoOutput.isLivePhotoCaptureSupported {
-
-            self.photoOutput.isLivePhotoCaptureEnabled = true
-            self.photoOutput.isLivePhotoAutoTrimmingEnabled = true
-
-            print(
-                "📸 Live Photo: re-enabled after video"
-            )
-        }
-
-          self.session.commitConfiguration()
-
-          self.movieRecordingDelegate = nil
-
-          print(
-              "🎥 Movie output removed"
-          )
+      guard let self = self else {
+        return
       }
+
+      self.session.beginConfiguration()
+
+      if self.session.outputs.contains(
+        self.movieOutput
+      ) {
+
+        self.session.removeOutput(
+          self.movieOutput
+        )
+      }
+
+      // ----------------------------------------------------------
+      // 重新啟用 Live Photo
+      // ----------------------------------------------------------
+
+      if self.photoOutput.isLivePhotoCaptureSupported {
+
+        self.photoOutput.isLivePhotoCaptureEnabled =
+          true
+
+        self.photoOutput.isLivePhotoAutoTrimmingEnabled =
+          true
+
+        print(
+          "📸 Live Photo: re-enabled after video"
+        )
+      }
+
+      self.session.commitConfiguration()
+
+      self.movieRecordingDelegate =
+        nil
+
+      print(
+        "🎥 Movie output removed"
+      )
+    }
   }
 
   // MARK: - Capture Live Photo
@@ -1314,10 +1625,14 @@ private func applyColorOverlay(
   ) async throws -> Bool {
 
     let photoURL =
-      URL(fileURLWithPath: photoPath)
+      URL(
+        fileURLWithPath: photoPath
+      )
 
     let videoURL =
-      URL(fileURLWithPath: videoPath)
+      URL(
+        fileURLWithPath: videoPath
+      )
 
     guard FileManager.default.fileExists(
       atPath: photoURL.path
@@ -1349,8 +1664,9 @@ private func applyColorOverlay(
           for: .addOnly
         )
 
-      guard granted == .authorized ||
-            granted == .limited
+      guard
+        granted == .authorized ||
+        granted == .limited
       else {
 
         throw CameraManagerError.unsupported(
@@ -1360,8 +1676,9 @@ private func applyColorOverlay(
 
     } else {
 
-      guard authorizationStatus == .authorized ||
-            authorizationStatus == .limited
+      guard
+        authorizationStatus == .authorized ||
+        authorizationStatus == .limited
       else {
 
         throw CameraManagerError.unsupported(
@@ -1411,8 +1728,8 @@ private func applyColorOverlay(
     }
   }
 
-  func captureLivePhoto() async throws
-    -> [String: String] {
+  func captureLivePhoto()
+    async throws -> [String: String] {
 
     guard session.isRunning else {
       throw CameraManagerError.cameraNotInitialized
@@ -1460,7 +1777,9 @@ private func applyColorOverlay(
     )
 
     let timestamp =
-      Int(Date().timeIntervalSince1970 * 1000)
+      Int(
+        Date().timeIntervalSince1970 * 1000
+      )
 
     let photoURL =
       capturesURL.appendingPathComponent(
@@ -1472,29 +1791,34 @@ private func applyColorOverlay(
         "LIVE_\(timestamp).mov"
       )
 
-    let settings: AVCapturePhotoSettings
+    let settings:
+      AVCapturePhotoSettings
 
     if photoOutput.availablePhotoCodecTypes.contains(
       AVVideoCodecType.jpeg
     ) {
 
-      settings = AVCapturePhotoSettings(
-        format: [
-          AVVideoCodecKey:
-            AVVideoCodecType.jpeg
-        ]
-      )
+      settings =
+        AVCapturePhotoSettings(
+          format: [
+            AVVideoCodecKey:
+              AVVideoCodecType.jpeg
+          ]
+        )
 
     } else {
 
-      settings = AVCapturePhotoSettings()
+      settings =
+        AVCapturePhotoSettings()
     }
 
     // Photo quality
 
-    if photoOutput.maxPhotoQualityPrioritization == .quality {
+    if photoOutput.maxPhotoQualityPrioritization ==
+        .quality {
 
-      settings.photoQualityPrioritization = .quality
+      settings.photoQualityPrioritization =
+        .quality
     }
 
     // Flash
@@ -1726,7 +2050,8 @@ private func applyColorOverlay(
         )
       }
 
-      device.exposureMode = .locked
+      device.exposureMode =
+        .locked
 
     } else {
 
@@ -1763,7 +2088,9 @@ private func applyColorOverlay(
 
     if mode == "locked" {
 
-      guard device.isLockingFocusWithCustomLensPositionSupported else {
+      guard
+        device.isLockingFocusWithCustomLensPositionSupported
+      else {
 
         throw CameraManagerError.unsupported(
           "裝置不支援手動對焦"
@@ -1787,7 +2114,8 @@ private func applyColorOverlay(
 
       if mode == "auto" {
 
-        focusMode = .autoFocus
+        focusMode =
+          .autoFocus
 
       } else {
 
@@ -1812,55 +2140,65 @@ private func applyColorOverlay(
   // MARK: - Focus Point
 
   func setFocusPoint(
-  x: Double,
-  y: Double
-) throws {
+    x: Double,
+    y: Double
+  ) throws {
 
-  guard let device = selectedDevice else {
-    throw CameraManagerError.cameraNotInitialized
-  }
+    guard let device = selectedDevice else {
+      throw CameraManagerError.cameraNotInitialized
+    }
 
-  guard device.isFocusPointOfInterestSupported else {
-    throw CameraManagerError.unsupported(
-      "目前鏡頭不支援指定對焦點"
+    guard device.isFocusPointOfInterestSupported else {
+
+      throw CameraManagerError.unsupported(
+        "目前鏡頭不支援指定對焦點"
+      )
+    }
+
+    let point =
+      CGPoint(
+        x: min(max(x, 0.0), 1.0),
+        y: min(max(y, 0.0), 1.0)
+      )
+
+    try device.lockForConfiguration()
+
+    defer {
+      device.unlockForConfiguration()
+    }
+
+    device.focusPointOfInterest =
+      point
+
+    if device.isFocusModeSupported(
+      .continuousAutoFocus
+    ) {
+
+      device.focusMode =
+        .continuousAutoFocus
+    }
+
+    guard device.isFocusModeSupported(
+      .autoFocus
+    ) else {
+
+      throw CameraManagerError.unsupported(
+        "目前鏡頭不支援單次自動對焦"
+      )
+    }
+
+    device.focusMode =
+      .autoFocus
+
+    print(
+      "🎯 Focus applied:",
+      "device =",
+      device.localizedName,
+      "point =",
+      point,
+      "mode = autoFocus"
     )
   }
-
-  let point = CGPoint(
-    x: min(max(x, 0.0), 1.0),
-    y: min(max(y, 0.0), 1.0)
-  )
-
-  try device.lockForConfiguration()
-
-  defer {
-    device.unlockForConfiguration()
-  }
-
-  // 設定指定對焦位置。
-  device.focusPointOfInterest = point
-
-  // 先切換至連續對焦，再啟動單次自動對焦，
-  // 讓重複點擊也能重新觸發對焦。
-  if device.isFocusModeSupported(.continuousAutoFocus) {
-    device.focusMode = .continuousAutoFocus
-  }
-
-  guard device.isFocusModeSupported(.autoFocus) else {
-    throw CameraManagerError.unsupported(
-      "目前鏡頭不支援單次自動對焦"
-    )
-  }
-
-  device.focusMode = .autoFocus
-
-  print(
-    "🎯 Focus applied:",
-    "device =", device.localizedName,
-    "point =", point,
-    "mode = autoFocus"
-  )
-}
 
   // MARK: - White Balance
 
@@ -1997,8 +2335,9 @@ private func applyColorOverlay(
       throw CameraManagerError.cameraNotInitialized
     }
 
-    guard device.hasFlash ||
-          device.hasTorch
+    guard
+      device.hasFlash ||
+      device.hasTorch
     else {
 
       throw CameraManagerError.unsupported(
@@ -2023,38 +2362,47 @@ private func applyColorOverlay(
         )
       }
 
-      device.torchMode = .on
+      device.torchMode =
+        .on
 
     case "on":
 
-      currentPhotoFlashMode = .on
+      currentPhotoFlashMode =
+        .on
 
       if device.hasTorch {
-        device.torchMode = .off
+        device.torchMode =
+          .off
       }
 
     case "auto":
 
-      currentPhotoFlashMode = .auto
+      currentPhotoFlashMode =
+        .auto
 
       if device.hasTorch {
-        device.torchMode = .off
+        device.torchMode =
+          .off
       }
 
     case "off":
 
-      currentPhotoFlashMode = .off
+      currentPhotoFlashMode =
+        .off
 
       if device.hasTorch {
-        device.torchMode = .off
+        device.torchMode =
+          .off
       }
 
     default:
 
-      currentPhotoFlashMode = .off
+      currentPhotoFlashMode =
+        .off
 
       if device.hasTorch {
-        device.torchMode = .off
+        device.torchMode =
+          .off
       }
     }
   }
@@ -2072,7 +2420,8 @@ private func applyColorOverlay(
 
     return [
 
-      "initialized": true,
+      "initialized":
+        true,
 
       "position":
         currentPosition == .front
@@ -2220,7 +2569,8 @@ private final class MovieRecordingDelegate:
     manager: ProCameraManager
   ) {
 
-    self.manager = manager
+    self.manager =
+      manager
 
     super.init()
   }
@@ -2319,9 +2669,7 @@ private final class LivePhotoCaptureDelegate:
     super.init()
   }
 
-  // ------------------------------------------------------------
-  // Photo
-  // ------------------------------------------------------------
+  // MARK: Photo
 
   func photoOutput(
     _ output: AVCapturePhotoOutput,
@@ -2372,9 +2720,7 @@ private final class LivePhotoCaptureDelegate:
     }
   }
 
-  // ------------------------------------------------------------
-  // Live Photo Movie
-  // ------------------------------------------------------------
+  // MARK: Live Photo Movie
 
   func photoOutput(
     _ output: AVCapturePhotoOutput,
@@ -2426,9 +2772,7 @@ private final class LivePhotoCaptureDelegate:
     }
   }
 
-  // ------------------------------------------------------------
-  // Finish
-  // ------------------------------------------------------------
+  // MARK: Finish
 
   private func tryFinish() {
 
