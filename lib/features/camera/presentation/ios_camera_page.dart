@@ -7271,11 +7271,11 @@ bool _isLivePhoto(String photoPath) {
     behavior: HitTestBehavior.opaque,
     onTap: _toggleMacroControl,
     child: SizedBox(
-      width: 52,
-      height: 52,
+      width: 56,
+      height: 56,
       child: Center(
         child: CustomPaint(
-          size: const Size(32, 32),
+          size: const Size(40, 40),
           painter: MacroFlowerPainter(
             color: isActive
                 ? Colors.yellowAccent
@@ -7863,6 +7863,8 @@ class _HistogramPainter extends CustomPainter {
 
 }
 
+
+
 class MacroFlowerPainter extends CustomPainter {
   final Color color;
   final bool disabled;
@@ -7882,46 +7884,54 @@ class MacroFlowerPainter extends CustomPainter {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2
-      ..strokeCap = StrokeCap.round;
+      ..strokeWidth = 2.8
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
 
-    const int petalCount = 6;
-    const double radius = 7.5;
+    const double petalDistance = 6.5;
+    const double petalRadius = 6.0;
 
     // 六片花瓣
-    for (int i = 0; i < petalCount; i++) {
-      final angle = (math.pi * 2 / petalCount) * i;
+    for (int i = 0; i < 6; i++) {
+      final angle = math.pi * 2 * i / 6;
 
       final petalCenter = Offset(
-        center.dx + math.cos(angle) * 5.5,
-        center.dy + math.sin(angle) * 5.5,
+        center.dx + math.cos(angle) * petalDistance,
+        center.dy + math.sin(angle) * petalDistance,
       );
 
       canvas.drawCircle(
         petalCenter,
-        radius,
+        petalRadius,
         paint,
       );
     }
 
-    // 中心
+    // 中心圓
+    final centerPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+
     canvas.drawCircle(
       center,
-      3.0,
-      paint,
+      3.5,
+      centerPaint,
     );
 
-    // 關閉狀態的斜線
+    // 關閉狀態
     if (disabled) {
       final slashPaint = Paint()
-        ..color = Colors.white70
+        ..color = Colors.white
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0
-        ..strokeCap = StrokeCap.round;
+        ..strokeWidth = 3.2
+        ..strokeCap = StrokeCap.round
+        ..isAntiAlias = true;
 
       canvas.drawLine(
-        const Offset(5, 27),
-        const Offset(27, 5),
+        const Offset(4, 28),
+        const Offset(28, 4),
         slashPaint,
       );
     }

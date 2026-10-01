@@ -415,7 +415,7 @@ final class ProCameraManager: NSObject {
     currentInput = newInput
     currentPosition = position
     currentLensType = lensType
-    
+
     // 一般手動切鏡頭不視為 Macro 自動觸發。
     isMacroEnabled = false
     macroNearCount = 0
@@ -612,10 +612,26 @@ private func selectCameraForMacro() throws {
   currentPosition = .back
   currentLensType = "ultraWide"
 
-  // 這是 Macro 狀態，不是 0.5x UI zoom。
   isMacroEnabled = true
 
   configureConnection()
+
+  // Macro 使用 Ultra Wide 後，重新設定近距離對焦。
+  do {
+      try device.lockForConfiguration()
+
+      if device.isFocusModeSupported(.continuousAutoFocus) {
+          device.focusMode = .continuousAutoFocus
+      }
+
+      if device.isExposureModeSupported(.continuousAutoExposure) {
+          device.exposureMode = .continuousAutoExposure
+      }
+
+      device.unlockForConfiguration()
+  } catch {
+      print("⚠️ Macro 對焦設定失敗: \(error.localizedDescription)")
+  }
 
   if photoOutput.isLivePhotoCaptureSupported {
     photoOutput.isLivePhotoCaptureEnabled = true
