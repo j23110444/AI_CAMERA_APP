@@ -397,8 +397,27 @@ final class ProCameraManager: NSObject {
     currentLensType = lensType
 
     configureConnection()
-  }
 
+    // ------------------------------------------------------------
+    // 重新確認 Live Photo 狀態
+    // ------------------------------------------------------------
+
+    if photoOutput.isLivePhotoCaptureSupported {
+        photoOutput.isLivePhotoCaptureEnabled = true
+        photoOutput.isLivePhotoAutoTrimmingEnabled = true
+
+        print(
+            "📸 Live Photo after camera switch:",
+            photoOutput.isLivePhotoCaptureEnabled
+        )
+    } else {
+        photoOutput.isLivePhotoCaptureEnabled = false
+
+        print(
+            "⚠️ Live Photo 不支援目前鏡頭：",
+            lensType
+        )
+    }
   // MARK: - Selected Device
 
   private var selectedDevice: AVCaptureDevice? {

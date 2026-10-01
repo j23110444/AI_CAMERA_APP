@@ -1623,48 +1623,57 @@ Future<bool> _saveImageToApplePhotos(String sourcePath) async {
 Future<bool> _saveCandidateToGallery(String sourcePath) async {
   final file = File(sourcePath);
 
+  if (!await file.exists()) {
+    debugPrint(
+      '❌ Candidate image does not exist: $sourcePath',
+    );
+    return false;
+  }
+
   try {
-    if (!await file.exists()) {
-      debugPrint(
-        'Candidate image does not exist: $sourcePath',
-      );
-      return false;
-    }
+    // ============================================================
+    // 1. 先記錄 Live Photo 關聯檔案
+    // ============================================================
 
-    // ------------------------------------------------------------
-    // 先真正保存到 Apple 原生照片
-    // ------------------------------------------------------------
+    final livePhotoVideoPath =
+        _livePhotoVideos[sourcePath];
 
-    final savedToApplePhotos =
+    final livePhotoOriginalPath =
+        _livePhotoOriginalPhotos[sourcePath];
+
+    final isLivePhoto =
+        livePhotoVideoPath != null;
+
+    debugPrint(
+      isLivePhoto
+          ? '📸 正在保存 Live Photo'
+          : '📸 正在保存一般照片',
+    );
+
+    // ============================================================
+    // 2. 儲存到 iPhone 原生照片
+    //
+    // ⚠️ 一定要先成功，才能刪除 App 內檔案
+    // ============================================================
+
+    final saved =
         await _saveImageToApplePhotos(sourcePath);
 
-    if (!savedToApplePhotos) {
+    if (!saved) {
       debugPrint(
-        '❌ 無法保存到 Apple 照片',
+        '❌ 儲存到原生相簿失敗：$sourcePath',
       );
+
       return false;
     }
 
-    // ------------------------------------------------------------
-    // Apple Photos 已經成功保存
-    // 現在才從 App 移除
-    // ------------------------------------------------------------
+    debugPrint(
+      '✅ 已成功保存到 iPhone 原生照片',
+    );
 
-    if (!mounted) {
-      return false;
-    }
-
-    setState(() {
-      _capturedImages.remove(sourcePath);
-
-      if (!_savedImages.contains(sourcePath)) {
-        _savedImages.add(sourcePath);
-      }
-    });
-
-    // ------------------------------------------------------------
-    // 刪除 App 內照片檔案
-    // ------------------------------------------------------------
+    // ============================================================
+    // 3. 刪除 App 內處理後照片
+    // ============================================================
 
     try {
       if (await file.exists()) {
@@ -1680,29 +1689,97 @@ Future<bool> _saveCandidateToGallery(String sourcePath) async {
       );
     }
 
-    // ------------------------------------------------------------
-    // Live Photo 資源
-    // ------------------------------------------------------------
+    // ============================================================
+    // 4. Live Photo 額外刪除 MOV
+    // ============================================================
 
-    await _deleteLivePhotoResources(
-      sourcePath,
-    );
+    if (livePhotoVideoPath != null) {
+      try {
+        final videoFile =
+            File(livePhotoVideoPath);
 
-    // ------------------------------------------------------------
-    // 更新 SharedPreferences
-    // ------------------------------------------------------------
+        if (await videoFile.exists()) {
+          await videoFile.delete();
+
+          debugPrint(
+            '🗑️ 已刪除 Live Photo MOV：'
+            '$livePhotoVideoPath',
+          );
+        }
+      } catch (error) {
+        debugPrint(
+          '⚠️ Live Photo MOV 刪除失敗：$error',
+        );
+      }
+    }
+
+    // ============================================================
+    // 5. Live Photo 額外刪除原始 JPG
+    //
+    // _saveImageToApplePhotos() 使用的就是這個原始檔案，
+    // 所以一定要等 Apple Photos 保存成功後才能刪。
+    // ============================================================
+
+    if (livePhotoOriginalPath != null &&
+        livePhotoOriginalPath != sourcePath) {
+      try {
+        final originalFile =
+            File(livePhotoOriginalPath);
+
+        if (await originalFile.exists()) {
+          await originalFile.delete();
+
+          debugPrint(
+            '🗑️ 已刪除 Live Photo 原始 JPG：'
+            '$livePhotoOriginalPath',
+          );
+        }
+      } catch (error) {
+        debugPrint(
+          '⚠️ Live Photo 原始 JPG 刪除失敗：$error',
+        );
+      }
+    }
+
+    // ============================================================
+    // 6. 從 App 相簿清單移除
+    //
+    // 不加入 _savedImages，因為實體檔案已經刪除了。
+    // ============================================================
+
+    if (mounted) {
+      setState(() {
+        _capturedImages.remove(sourcePath);
+        _savedImages.remove(sourcePath);
+      });
+    }
+
+    // ============================================================
+    // 7. 清除 Live Photo 記憶體中的關聯資料
+    // ============================================================
+
+    _livePhotoVideos.remove(sourcePath);
+    _livePhotoOriginalPhotos.remove(sourcePath);
+    _livePhotoAssetIdentifiers.remove(sourcePath);
+
+    // ============================================================
+    // 8. 更新 SharedPreferences
+    // ============================================================
 
     await _persistImageLists();
 
     debugPrint(
-      '✅ 已保存到 Apple 照片並清除 App 原始照片',
+      isLivePhoto
+          ? '✅ Live Photo 已保存至原生相簿，'
+            '並清除 App 內 JPG + MOV'
+          : '✅ 照片已保存至原生相簿，'
+            '並刪除 App 內照片',
     );
 
     return true;
-
   } catch (error, stackTrace) {
     debugPrint(
-      '❌ 保存候選照片失敗：$error',
+      '❌ 保存照片失敗：$error',
     );
 
     debugPrint(
