@@ -500,15 +500,6 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       _zoomLevel = 1.0;
       _isUltraWideActive = false;
 
-      // 不要在這裡設定：
-      //
-      // _macroEnabled = false;
-      //
-      // 因為回到 1x 後，
-      // Native Virtual Camera 可能立刻偵測到
-      // 近距離 Macro。
-      _macroUserDisabled = false;
-
       _focusPoint = null;
       _isFocusVisible = false;
       _isAeAfLocked = false;
@@ -540,11 +531,6 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   }
 
   try {
-    // ----------------------------------------------------------
-    // 目前是 Macro ON
-    // → 使用者手動關閉
-    // ----------------------------------------------------------
-
     if (_macroEnabled) {
       await _cameraAdapter.setMacroMode(false);
 
@@ -555,23 +541,10 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
         _macroUserDisabled = true;
       });
 
-      // 不要：
-      //
-      // _zoomLevel = 1.0;
-      // _isUltraWideActive = false;
-      //
-      // Macro 不等於 0.5x，
-      // 也不應該因為關閉 Macro 就強制改變目前倍率。
-
+      // 不改變目前 zoom。
+      // 不強制回 1x。
       return;
     }
-
-    // ----------------------------------------------------------
-    // 如果目前處於 userDisabled
-    //
-    // 正常情況下 UI 已經隱藏，
-    // 因此這裡只是保留 API 完整性。
-    // ----------------------------------------------------------
 
     if (_macroUserDisabled) {
       await _cameraAdapter.setMacroMode(true);
@@ -581,8 +554,6 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
       setState(() {
         _macroUserDisabled = false;
       });
-
-      return;
     }
 
   } catch (e) {
@@ -1327,7 +1298,7 @@ Future<void> _capturePhoto() async {
     }
 
     if ((details.scale - 1).abs() > 0.01) {
-      final nextZoom = (_baseZoom * details.scale).clamp(1.0, 5.0);
+      final nextZoom = (_baseZoom * details.scale).clamp(0.5, 5.0);
       if (_zoomLevel != nextZoom) {
         setState(() => _zoomLevel = nextZoom);
         unawaited(_cameraAdapter.setZoom(nextZoom));
@@ -7003,71 +6974,139 @@ bool _isLivePhoto(String photoPath) {
                             });
                           },
                           onHorizontalDragUpdate: (details) async {
-                            if (_cameraSwitching || _cameraInitializing) return;
-
-                            final nextZoom = (_zoomLevel - details.primaryDelta! * 0.01)
-                                .clamp(0.5, 5.0)
-                                .toDouble();
-
-                            final shouldUseUltraWide = nextZoom < 1.0;
-
-                            setState(() {
-                              _zoomLevel = nextZoom;
-                            });
-
-                            // 跨越 1x 時切換實體鏡頭
-                            if (shouldUseUltraWide != _isUltraWideActive) {
-                              setState(() {
-                                _cameraSwitching = true;
-                              });
-
-                              try {
-                                if (shouldUseUltraWide) {
-                                  await _cameraAdapter.switchToUltraWide();
-                                } else {
-                                  await _cameraAdapter.switchToStandardWide();
-                                }
-
-                                if (!mounted) return;
-
-                                setState(() {
-                                  _isUltraWideActive = shouldUseUltraWide;
-                                  _focusPoint = null;
-                                  _isFocusVisible = false;
-                                  _isAeAfLocked = false;
-                                });
-
-                                // 切換完成後再設定原生變焦
-                                await _cameraAdapter.setZoom(
-                                  shouldUseUltraWide ? 1.0 : nextZoom,
-                                );
-                              } catch (error) {
-                                if (mounted) {
-                                  setState(() {
-                                    _zoomLevel = _isUltraWideActive ? 0.5 : 1.0;
-                                  });
-
-                                  _showAiTip('⚠️ 鏡頭切換失敗：$error');
-                                }
-                              } finally {
-                                if (mounted) {
-                                  setState(() {
-                                    _cameraSwitching = false;
-                                  });
-                                }
+                              if (_cameraSwitching ||
+                                  _cameraInitializing) {
+                                return;
                               }
 
-                              return;
-                            }
+                              final nextZoom =
+                                  (_zoomLevel -
+                                          details.primaryDelta! * 0.01)
+                                      .clamp(0.5, 5.0)
+                                      .toDouble();
 
-                            // UI zoom → Native zoom
-                            // 超廣角固定原生 1x，主鏡頭使用實際變焦倍率
-                            final nativeZoom = _isUltraWideActive ? 1.0 : nextZoom;
+                              final shouldUseUltraWide =
+                                  nextZoom < 1.0;
 
-                            unawaited(
-                              _cameraAdapter.setZoom(nativeZoom),
-                            );
-                          },
+                              setState(() {
+                                _zoomLevel = nextZoom;
+                              });
+
+                              // ----------------------------------------------------------
+                              // 只有跨過 1x 才真正切換 Camera Input。
+                              //
+                              // 0.5x ~ 0.99x：
+                              // 一直使用 Ultra Wide。
+                              //
+                              // 1.0x ~ 5x：
+                              // 使用 Wide Virtual Camera。
+                              //
+                              // 避免使用者拖動時一直重建 Camera Input。
+                              // ----------------------------------------------------------
+
+                              if (shouldUseUltraWide !=
+                                  _isUltraWideActive) {
+
+                                setState(() {
+                                  _cameraSwitching = true;
+                                });
+
+                                try {
+
+                                  if (shouldUseUltraWide) {
+
+                                    await _cameraAdapter
+                                        .switchToUltraWide();
+
+                                  } else {
+
+                                    await _cameraAdapter
+                                        .switchToStandardWide();
+                                  }
+
+                                  if (!mounted) return;
+
+                                  setState(() {
+
+                                    _isUltraWideActive =
+                                        shouldUseUltraWide;
+
+                                    _focusPoint = null;
+                                    _isFocusVisible = false;
+                                    _isAeAfLocked = false;
+                                  });
+
+                                  // ------------------------------------------------------
+                                  // App Zoom → Native Zoom
+                                  //
+                                  // Ultra Wide：
+                                  //
+                                  // App 0.5x = Native 1.0x
+                                  // App 0.75x = Native 1.5x
+                                  // App 0.9x = Native 1.8x
+                                  // App 1.0x = 切回 Wide
+                                  //
+                                  // 這樣 0.5 → 0.99 不需要一直換鏡頭。
+                                  // ------------------------------------------------------
+
+                                  final nativeZoom =
+                                      shouldUseUltraWide
+                                          ? (nextZoom / 0.5)
+                                              .clamp(1.0, 2.0)
+                                              .toDouble()
+                                          : nextZoom;
+
+                                  await _cameraAdapter.setZoom(
+                                    nativeZoom,
+                                  );
+
+                                } catch (error) {
+
+                                  if (mounted) {
+
+                                    setState(() {
+
+                                      _zoomLevel =
+                                          _isUltraWideActive
+                                              ? 0.5
+                                              : 1.0;
+                                    });
+
+                                    _showAiTip(
+                                      '⚠️ 鏡頭切換失敗：$error',
+                                    );
+                                  }
+
+                                } finally {
+
+                                  if (mounted) {
+
+                                    setState(() {
+                                      _cameraSwitching = false;
+                                    });
+                                  }
+                                }
+
+                                return;
+                              }
+
+                              // ----------------------------------------------------------
+                              // 同一顆鏡頭內連續 Zoom
+                              // ----------------------------------------------------------
+
+                              final nativeZoom =
+                                  _isUltraWideActive
+                                      ? (nextZoom / 0.5)
+                                          .clamp(1.0, 2.0)
+                                          .toDouble()
+                                      : nextZoom;
+
+                              unawaited(
+                                _cameraAdapter.setZoom(
+                                  nativeZoom,
+                                ),
+                              );
+                            },
                           onHorizontalDragEnd: (details) {
                             setState(() {
                               _isZoomDragging = false;
@@ -7331,25 +7370,19 @@ bool _isLivePhoto(String photoPath) {
   }
 
   Widget _buildMacroControl() {
-  // ------------------------------------------------------------
-  // Macro UI 只有在：
+  // 正常狀態不顯示。
   //
-  // 1. 有後置 Virtual Camera
-  // 2. 自動 Macro 已被觸發
+  // 只有：
+  // Macro 自動觸發
+  // ↓
+  // 顯示黃色小花
   //
-  // 才顯示。
-  //
-  // 使用者手動關閉後：
-  // _macroAvailable = false
-  // → UI 直接消失。
-  // ------------------------------------------------------------
-
+  // 使用者手動關閉
+  // ↓
+  // 小花直接消失
   if (!_macroAvailable ||
-      _macroUserDisabled) {
-    return const SizedBox.shrink();
-  }
-
-  if (!_macroEnabled) {
+      _macroUserDisabled ||
+      !_macroEnabled) {
     return const SizedBox.shrink();
   }
 

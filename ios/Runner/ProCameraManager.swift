@@ -569,13 +569,15 @@ final class ProCameraManager: NSObject {
     //
 
     if position != .back || lensType == "ultraWide" {
-      isMacroEnabled = false
-      macroNearSubject = false
+        isMacroEnabled = false
+        macroNearSubject = false
 
-      // 離開 Wide Virtual Camera 後，
-    // 下一次回到 1x 可以重新進行自動 Macro 判斷。
-      isMacroUserDisabled = false
-    }
+        // 不要在鏡頭切換時清除 isMacroUserDisabled。
+        //
+        // 使用者如果剛剛手動關閉 Macro，
+        // 回到 1x 時仍然要保持關閉，
+        // 直到真正離開近距離場景。
+      }
 
     configureConnection()
 
@@ -606,12 +608,17 @@ final class ProCameraManager: NSObject {
 
 // MARK: - Macro Mode
 
-/// 是否存在可用的後置 Wide Virtual Camera。
+/// Macro 是近距離輔助狀態，不等於 0.5x。
 ///
-/// Macro 的自動判斷依賴 Virtual Camera 的
-/// activePrimaryConstituent。
-private var macroVirtualCameraAvailable: Bool {
+/// 正常 1x 使用 Wide Virtual Camera。
+/// AVFoundation 在近距離場景會把 active constituent
+/// 切到 Ultra Wide，這裡用它作為 Macro 觸發訊號。
+private var isMacroEnabled = false
+private var isMacroUserDisabled = false
+private var macroNearSubject = false
+private var macroMonitorTimer: Timer?
 
+private var macroVirtualCameraAvailable: Bool {
   guard currentPosition == .back else {
     return false
   }
@@ -623,48 +630,29 @@ private var macroVirtualCameraAvailable: Bool {
   return device.isVirtualDevice
 }
 
-/// 目前 Virtual Camera 是否處於「Macro 近距離」狀態。
+/// 判斷目前是否為 Macro 近距離狀態。
 ///
-/// 這裡不是把 Ultra Wide 永久當成 Macro。
-///
-/// 只有在：
-/// 1. 後置
-/// 2. Wide Virtual Camera
-/// 3. 約 1x
-/// 4. AVFoundation 實際把 active constituent 切到 Ultra Wide
-///
-/// 才視為 Macro 自動觸發。
-///
-/// Apple 的 Virtual Camera 會依 zoom、focus、exposure
-/// 自動選擇 constituent；因此 activePrimaryConstituent
-/// 是這裡最重要的判斷訊號。
+/// 注意：
+/// 0.5x 的 Ultra Wide 是正常廣角，不是 Macro。
+/// 只有 Wide Virtual Camera 在約 1x 附近，
+/// 且 AVFoundation 主動把 constituent 切到 Ultra Wide，
+/// 才視為 Macro。
 private func isMacroScene(
   device: AVCaptureDevice
 ) -> Bool {
 
-  guard device.isVirtualDevice else {
-    return false
-  }
-
-  guard currentPosition == .back else {
-    return false
-  }
-
-  guard currentLensType == "wide" else {
+  guard device.isVirtualDevice,
+        currentPosition == .back,
+        currentLensType == "wide"
+  else {
     return false
   }
 
   let zoom = device.videoZoomFactor
 
-  // Macro 自動切換只在接近 1x 時判斷。
-  //
-  // 這可以避免：
-  // 0.5x = Ultra Wide
-  // 被誤判成 Macro。
-  //
-  // 也避免 2x / 3x / 5x 時，
-  // Virtual Camera 使用其他 constituent 被誤判。
-  guard zoom >= 0.90 && zoom <= 1.15 else {
+  // 只在正常 1x 附近判斷 Macro。
+  // 不讓 0.5x Ultra Wide 被誤判成 Macro。
+  guard zoom >= 0.90 && zoom <= 1.10 else {
     return false
   }
 
@@ -678,12 +666,6 @@ private func isMacroScene(
     .builtInUltraWideCamera
 }
 
-/// 設定 Virtual Camera 的 constituent switching。
-///
-/// .auto 是正常的 Virtual Camera 行為。
-///
-/// 不在這裡強制選 Ultra Wide。
-/// 不在這裡把 Ultra Wide 永久當成 Macro。
 private func configureVirtualCamera(
   _ device: AVCaptureDevice
 ) throws {
@@ -710,6 +692,8 @@ private func configureVirtualCamera(
     return
   }
 
+  // 保持 iPhone 原生自動鏡頭選擇。
+  // 不要在這裡強制切 Ultra Wide。
   device.setPrimaryConstituentDeviceSwitchingBehavior(
     .auto,
     restrictedSwitchingBehaviorConditions: []
@@ -722,82 +706,63 @@ private func configureVirtualCamera(
 
 // MARK: Macro Control
 
-/// 使用者手動控制 Macro。
-///
-/// enabled = true：重新允許自動 Macro。
-///
-/// enabled = false：
-/// 暫時禁止 Macro UI，直到離開近距離場景。
 func setMacroMode(
   enabled: Bool
 ) throws {
 
-  guard currentPosition == .back else {
+  guard currentPosition == .back,
+        currentLensType == "wide"
+  else {
+
     isMacroEnabled = false
-    isMacroUserDisabled = false
     macroNearSubject = false
+
     return
   }
 
-  guard currentLensType == "wide" else {
-    isMacroEnabled = false
+  if enabled {
+
+    // 使用者重新允許 Macro。
     isMacroUserDisabled = false
-    macroNearSubject = false
-    return
-  }
 
-  if !enabled {
-
-    // ----------------------------------------------------------
-    // 使用者手動關閉 Macro
-    // ----------------------------------------------------------
-
-    isMacroEnabled = false
-    isMacroUserDisabled = true
-
-    // 記錄目前是否仍處於近距離。
-    //
-    // 如果使用者是在物體很近時按下小花，
-    // 就必須等他離開近距離後，下一次靠近才能重新觸發。
-    if let device = selectedDevice,
-       device.isVirtualDevice {
-
-      macroNearSubject =
-        isMacroScene(device: device)
-    } else {
-
-      macroNearSubject = false
-    }
+    updateMacroState()
 
     print(
-      "🌼 Macro manually disabled:",
-      "nearSubject =",
-      macroNearSubject
+      "🌼 Macro automatic control re-enabled"
     )
 
     return
   }
 
-  // ------------------------------------------------------------
-  // 重新允許自動 Macro
-  // ------------------------------------------------------------
+  // 使用者手動關閉 Macro。
+  //
+  // 不改變 zoom。
+  // 不切換鏡頭。
+  // 不強制回 1x。
+  isMacroEnabled = false
+  isMacroUserDisabled = true
 
-  isMacroUserDisabled = false
+  if let device = selectedDevice,
+     device.isVirtualDevice {
+
+    macroNearSubject =
+      isMacroScene(
+        device: device
+      )
+
+  } else {
+
+    macroNearSubject = false
+  }
 
   print(
-    "🌼 Macro automatic control re-enabled"
+    "🌼 Macro manually disabled:",
+    "nearSubject =",
+    macroNearSubject
   )
-
-  updateMacroState()
 }
 
-// MARK: Macro State
-
 func macroState() -> [String: Any] {
-
-  let available =
-    macroVirtualCameraAvailable &&
-    !isMacroUserDisabled
 
   return [
     "enabled":
@@ -806,9 +771,11 @@ func macroState() -> [String: Any] {
     "userDisabled":
       isMacroUserDisabled,
 
-    // 手動關閉後直接讓 Flutter UI 消失。
+    // 使用者手動關閉後，
+    // Flutter 直接隱藏花朵。
     "available":
-      available
+      macroVirtualCameraAvailable &&
+      !isMacroUserDisabled
   ]
 }
 
@@ -866,17 +833,13 @@ private func updateMacroState() {
     return
   }
 
-  let zoom =
-    device.videoZoomFactor
-
   let nearSubject =
     isMacroScene(
       device: device
     )
 
-  // ------------------------------------------------------------
-  // Debug
-  // ------------------------------------------------------------
+  macroNearSubject =
+    nearSubject
 
   if let active =
     device.activePrimaryConstituent {
@@ -886,7 +849,7 @@ private func updateMacroState() {
       "zoom =",
       String(
         format: "%.2f",
-        zoom
+        device.videoZoomFactor
       ),
       "active =",
       active.localizedName,
@@ -906,24 +869,21 @@ private func updateMacroState() {
 
   if isMacroUserDisabled {
 
-    // 如果使用者已經拉遠，
-    // 而且目前又回到約 1x，
-    // 就解除 suppression。
-    //
-    // 注意：
-    // 如果使用者只是從 1x 拉到 2x/3x，
-    // 不要立即解除 suppression。
-    if !nearSubject &&
-       zoom <= 1.15 {
-
-      isMacroUserDisabled = false
-      macroNearSubject = false
-
-      print(
-        "🌼 Macro suppression reset:"
-        + " subject left close range"
-      )
+    // 還在近距離：
+    // 不允許 Macro 再次出現。
+    if nearSubject {
+      return
     }
+
+    // 已經離開近距離：
+    // 才解除 suppression。
+    isMacroUserDisabled = false
+    macroNearSubject = false
+
+    print(
+      "🌼 Macro suppression reset:"
+      + " subject left close range"
+    )
 
     return
   }
@@ -933,8 +893,6 @@ private func updateMacroState() {
   // ------------------------------------------------------------
 
   if nearSubject {
-
-    macroNearSubject = true
 
     if !isMacroEnabled {
 
@@ -949,38 +907,17 @@ private func updateMacroState() {
   }
 
   // ------------------------------------------------------------
-  // Macro 已經開啟時
-  // ------------------------------------------------------------
-  //
-  // 1x → 2x / 3x / 5x
-  //
-  // 必須保持 Macro UI 狀態。
-  //
-  // 只有回到約 1x，並且物體已經離開近距離，
-  // 才關閉 Macro。
+  // 離開近距離
   // ------------------------------------------------------------
 
   if isMacroEnabled {
 
-    if zoom <= 1.15 {
+    isMacroEnabled = false
 
-      isMacroEnabled = false
-      macroNearSubject = false
-
-      print(
-        "🌼 Macro AUTO OFF:"
-        + " subject left close range"
-      )
-    }
-
-    return
+    print(
+      "🌼 Macro AUTO OFF"
+    )
   }
-
-  // ------------------------------------------------------------
-  // 尚未進入 Macro
-  // ------------------------------------------------------------
-
-  macroNearSubject = false
 }
 
   // MARK: - Selected Device
