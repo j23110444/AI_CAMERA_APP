@@ -4203,16 +4203,25 @@ bool _isLivePhoto(String photoPath) {
                     _showAiTip('📌 已加入 APP 相簿');
                   }
 
-                  // ==================================================
+                                    // ==================================================
                   // 第二階段
                   // APP 內相簿 → Apple 照片
                   // ==================================================
                   else {
                     // ------------------------------------------------
-                    // ② 正式保存到 Apple 照片
+                    // 正式保存到 Apple 照片
+                    //
+                    // _saveCandidateToGallery() 會：
+                    // 1. 保存到 Apple Photos
+                    // 2. 刪除 App 內 JPG
+                    // 3. Live Photo 額外刪除 MOV / 原始 JPG
+                    // 4. 從 _savedImages 移除
+                    // 5. 清除 Live Photo 關聯
+                    // 6. 更新 SharedPreferences
                     // ------------------------------------------------
+
                     final savedSuccessfully =
-                        await _saveImageToApplePhotos(itemPath);
+                        await _saveCandidateToGallery(itemPath);
 
                     if (!mounted) {
                       isAnimating = false;
@@ -4236,19 +4245,14 @@ bool _isLivePhoto(String photoPath) {
                       return;
                     }
 
-                    // ------------------------------------------------
-                    // 保存成功
-                    //
-                    // 注意：
-                    // 不從 _savedImages 移除
-                    // ------------------------------------------------
-                    await _persistImageLists();
-
                     debugPrint(
-                      '✅ RIGHT SWIPE → APPLE PHOTOS: $itemPath',
+                      '✅ RIGHT SWIPE → APP ALBUM → APPLE PHOTOS: '
+                      '$itemPath',
                     );
 
-                    _showAiTip('✅ 已保存到 Apple 照片');
+                    _showAiTip(
+                      '✅ 已保存到 Apple 照片並移除 APP 相簿',
+                    );
                   }
 
                   // ==================================================
