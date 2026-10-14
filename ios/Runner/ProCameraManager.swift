@@ -2009,13 +2009,23 @@ private func updateMacroState() {
     var nativeZoom = value
 
     if currentPosition == .back {
-      if value < 1.0 && currentLensType == "wide",
-         let device = selectedDevice,
-         !device.isVirtualDevice {
-        try selectCamera(
-          position: .back,
-          lensType: "ultraWide"
-        )
+      if value < 1.0 && currentLensType == "wide" {
+        let virtualCameraCanReachZoom: Bool
+
+        if let device = selectedDevice,
+           device.isVirtualDevice {
+          virtualCameraCanReachZoom =
+            value >= device.minAvailableVideoZoomFactor
+        } else {
+          virtualCameraCanReachZoom = false
+        }
+
+        if !virtualCameraCanReachZoom {
+          try selectCamera(
+            position: .back,
+            lensType: "ultraWide"
+          )
+        }
       } else if value >= 1.0 && currentLensType == "ultraWide" {
         try selectCamera(
           position: .back,
