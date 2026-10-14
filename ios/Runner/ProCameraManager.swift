@@ -2064,7 +2064,7 @@ private func updateMacroState() {
 
     if smoothly {
       device.ramp(
-        zoom,
+        toVideoZoomFactor: zoom,
         withRate: 3.0
       )
     } else {
