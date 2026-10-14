@@ -1430,7 +1430,7 @@ private func updateMacroState() {
     guard let jpegData = ciContext.jpegRepresentation(
       of: image,
       colorSpace: outputColorSpace,
-      options: [.lossyCompressionQuality: 0.92]
+      options: [:]
     ) else {
 
       throw CameraManagerError.unsupported(
@@ -1455,7 +1455,7 @@ private func updateMacroState() {
 
     try jpegData.write(
       to: outputURL,
-      options: .atomic
+      options: Data.WritingOptions.atomic
     )
 
     print(
@@ -2063,9 +2063,9 @@ private func updateMacroState() {
     }
 
     if smoothly {
-      device.rampToVideoZoomFactor(
-        withRate: 3.0,
-        toVideoZoomFactor: zoom
+      device.ramp(
+        zoom,
+        withRate: 3.0
       )
     } else {
       device.videoZoomFactor = zoom
