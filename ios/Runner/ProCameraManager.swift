@@ -747,25 +747,15 @@ func setMacroMode(
     return
   }
 
-  // Replacing the virtual input returns to the physical wide lens.
-  guard let device = selectedDevice,
-        device.isVirtualDevice
-  else {
+  guard let device = selectedDevice else {
     throw CameraManagerError.cameraNotInitialized
   }
 
-  // Replacing the virtual input with the physical wide camera forces the
-  // camera back to the real 1x lens even when Macro is currently using UW.
-  try selectCamera(
-    position: .back,
-    lensType: "wide",
-    preferPhysicalWide: true
-  )
-
+  try configureVirtualCamera(device)
   isMacroUserDisabled = true
   isMacroEnabled = false
   isMacroAutomaticEnabled = false
-  macroNearSubject = true
+  macroNearSubject = false
 
   print(
     "🌼 Macro manually disabled:",
@@ -1993,53 +1983,11 @@ private func updateMacroState() {
       throw CameraManagerError.cameraNotInitialized
     }
 
-    if isMacroUserDisabled,
-       currentPosition == .back,
-       currentLensType == "wide",
-       value < 0.90 || value > 1.10 {
-      if let device = selectedDevice,
-         !device.isVirtualDevice {
-        try selectCamera(
-          position: .back,
-          lensType: "wide"
-        )
-      }
-
-      isMacroUserDisabled = false
-      isMacroEnabled = false
-      macroNearSubject = false
-    }
-
     var nativeZoom = value
 
-    if currentPosition == .back {
-      if value < 1.0 && currentLensType == "wide" {
-        let virtualCameraCanReachZoom: Bool
-
-        if let device = selectedDevice,
-           device.isVirtualDevice {
-          virtualCameraCanReachZoom =
-            value >= device.minAvailableVideoZoomFactor
-        } else {
-          virtualCameraCanReachZoom = false
-        }
-
-        if !virtualCameraCanReachZoom {
-          try selectCamera(
-            position: .back,
-            lensType: "ultraWide"
-          )
-        }
-      } else if value >= 1.0 && currentLensType == "ultraWide" {
-        try selectCamera(
-          position: .back,
-          lensType: "wide"
-        )
-      }
-
-      if currentLensType == "ultraWide" {
-        nativeZoom = value / 0.5
-      }
+    if currentPosition == .back,
+       currentLensType == "ultraWide" {
+      nativeZoom = value / 0.5
     }
 
     guard let device = selectedDevice else {

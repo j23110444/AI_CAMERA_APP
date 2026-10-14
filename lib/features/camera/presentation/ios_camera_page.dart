@@ -5651,70 +5651,55 @@ bool _isLivePhoto(String photoPath) {
                                   ),
                                 ],
                               )
-                           : SizedBox.expand(
-                              key: _previewKey,
-                              child: ClipRect(
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    // iOS 使用原生 AVFoundation 預覽
-                                    if (Platform.isIOS)
-                                      const UiKitView(
-                                        viewType: 'ai_camera/pro_preview',
-                                      )
-                                    else
-                                      _buildCameraPreview(),
+                           : Center(
+                              child: AspectRatio(
+                                key: _previewKey,
+                                aspectRatio: switch (_aspectRatio) {
+                                  '16:9' => 9 / 16,
+                                  '1:1' => 1,
+                                  _ => 3 / 4,
+                                },
+                                child: ClipRect(
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      // iOS 使用原生 AVFoundation 預覽
+                                      if (Platform.isIOS)
+                                        const UiKitView(
+                                          viewType: 'ai_camera/pro_preview',
+                                        )
+                                      else
+                                        _buildCameraPreview(),
 
-                                    // Flutter UI overlay 保持不變
-                                    _buildPreviewEffectOverlay(),
-                                    _buildFocusOverlay(),
-                                    _buildLevelOverlay(),
-                                    _buildProOverlay(),
+                                      _buildPreviewEffectOverlay(),
+                                      _buildFocusOverlay(),
+                                      _buildLevelOverlay(),
+                                      _buildProOverlay(),
+                                      CustomPaint(
+                                        painter: CompositionGridPainter(
+                                          _compositionGrid,
+                                        ),
+                                      ),
 
-                                    Center(
-                                      child: AspectRatio(
-                                        aspectRatio: switch (_aspectRatio) {
-                                          '16:9' => 9 / 16,
-                                          '1:1' => 1,
-                                          _ => 3 / 4,
-                                        },
-                                        child: IgnorePointer(
-                                          child: DecoratedBox(
-                                            decoration: BoxDecoration(
-                                              border: Border.all(
-                                                color: Colors.white70,
-                                                width: 1,
-                                              ),
+                                      if (_timerCountdown > 0)
+                                        Center(
+                                          child: Text(
+                                            '$_timerCountdown',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 72,
+                                              fontWeight: FontWeight.w300,
+                                              shadows: [
+                                                Shadow(
+                                                  color: Colors.black,
+                                                  blurRadius: 8,
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-
-                                    CustomPaint(
-                                      painter: CompositionGridPainter(
-                                        _compositionGrid,
-                                      ),
-                                    ),
-
-                                    if (_timerCountdown > 0)
-                                      Center(
-                                        child: Text(
-                                          '$_timerCountdown',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 72,
-                                            fontWeight: FontWeight.w300,
-                                            shadows: [
-                                              Shadow(
-                                                color: Colors.black,
-                                                blurRadius: 8,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
