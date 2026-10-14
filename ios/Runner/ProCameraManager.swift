@@ -439,7 +439,6 @@ final class ProCameraManager: NSObject {
     preferPhysicalWide: Bool = true
   ) throws {
 
-    let previousDevice = currentInput?.device
     let device: AVCaptureDevice
 
     // ------------------------------------------------------------
@@ -477,17 +476,6 @@ final class ProCameraManager: NSObject {
 
       device = physicalDevice
     }
-
-    let switchesRearCamera =
-      currentPosition == .back &&
-      position == .back &&
-      (currentLensType == "wide" || currentLensType == "ultraWide") &&
-      (lensType == "wide" || lensType == "ultraWide") &&
-      previousDevice.map { $0.uniqueID != device.uniqueID } == true
-    let previousWhiteBalanceGains =
-      switchesRearCamera
-        ? previousDevice?.deviceWhiteBalanceGains
-        : nil
 
     session.beginConfiguration()
 
@@ -535,13 +523,6 @@ final class ProCameraManager: NSObject {
     currentInput = newInput
     currentPosition = position
     currentLensType = lensType
-
-    if let previousWhiteBalanceGains {
-      preserveWhiteBalance(
-        previousWhiteBalanceGains,
-        on: device
-      )
-    }
 
     // ------------------------------------------------------------
     // Virtual Camera
@@ -693,34 +674,6 @@ private func configureVirtualCamera(
   )
 
   return true
-}
-
-private func preserveWhiteBalance(
-  _ sourceGains: AVCaptureDevice.WhiteBalanceGains,
-  on device: AVCaptureDevice
-) {
-  guard device.isWhiteBalanceModeSupported(.locked) else {
-    print("⚠️ Lens switch: locked white balance is unsupported")
-    return
-  }
-
-  let maxGain = device.maxWhiteBalanceGain
-  let gains = AVCaptureDevice.WhiteBalanceGains(
-    redGain: min(max(sourceGains.redGain, 1.0), maxGain),
-    greenGain: min(max(sourceGains.greenGain, 1.0), maxGain),
-    blueGain: min(max(sourceGains.blueGain, 1.0), maxGain)
-  )
-
-  do {
-    try device.lockForConfiguration()
-    defer {
-      device.unlockForConfiguration()
-    }
-
-    device.setWhiteBalanceModeLocked(with: gains)
-  } catch {
-    print("⚠️ Lens switch: failed to preserve white balance: \(error)")
-  }
 }
 
 // MARK: Macro Control
