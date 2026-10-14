@@ -571,12 +571,7 @@ final class ProCameraManager: NSObject {
     if position != .back || lensType == "ultraWide" {
         isMacroEnabled = false
         macroNearSubject = false
-
-        // 不要在鏡頭切換時清除 isMacroUserDisabled。
-        //
-        // 使用者如果剛剛手動關閉 Macro，
-        // 回到 1x 時仍然要保持關閉，
-        // 直到真正離開近距離場景。
+        isMacroUserDisabled = false
       }
 
     configureConnection()
@@ -616,7 +611,39 @@ private var macroVirtualCameraAvailable: Bool {
     return false
   }
 
-  return device.isVirtualDevice
+  return device.isVirtualDevice &&
+    supportsAutoMacroControl(device)
+}
+
+private func supportsAutoMacroControl(
+  _ device: AVCaptureDevice
+) -> Bool {
+  // This toggle isn’t part of the public AVFoundation SDK.
+  device.responds(
+    to: NSSelectorFromString("setAutoMacroEnabled:")
+  )
+}
+
+private func setAutoMacroEnabled(
+  _ enabled: Bool,
+  on device: AVCaptureDevice
+) throws {
+  guard supportsAutoMacroControl(device) else {
+    throw CameraManagerError.unsupported(
+      "目前相機不支援自動微距控制"
+    )
+  }
+
+  try device.lockForConfiguration()
+
+  defer {
+    device.unlockForConfiguration()
+  }
+
+  device.setValue(
+    enabled,
+    forKey: "autoMacroEnabled"
+  )
 }
 
 /// 判斷目前是否為 Macro 近距離狀態。
@@ -688,6 +715,13 @@ private func configureVirtualCamera(
     restrictedSwitchingBehaviorConditions: []
   )
 
+  if supportsAutoMacroControl(device) {
+    device.setValue(
+      !isMacroUserDisabled,
+      forKey: "autoMacroEnabled"
+    )
+  }
+
   print(
     "📷 Virtual Camera switching = AUTO"
   )
@@ -712,6 +746,17 @@ func setMacroMode(
   if enabled {
 
     // 使用者重新允許 Macro。
+    guard let device = selectedDevice,
+          device.isVirtualDevice,
+          supportsAutoMacroControl(device)
+    else {
+      throw CameraManagerError.unsupported(
+        "目前相機不支援自動微距控制"
+      )
+    }
+
+    try setAutoMacroEnabled(true, on: device)
+
     isMacroUserDisabled = false
 
     updateMacroState()
@@ -728,21 +773,21 @@ func setMacroMode(
   // 不改變 zoom。
   // 不切換鏡頭。
   // 不強制回 1x。
+  guard let device = selectedDevice,
+        device.isVirtualDevice,
+        supportsAutoMacroControl(device)
+  else {
+    throw CameraManagerError.unsupported(
+      "目前相機不支援自動微距控制"
+    )
+  }
+
+  try setAutoMacroEnabled(false, on: device)
+
   isMacroEnabled = false
   isMacroUserDisabled = true
 
-  if let device = selectedDevice,
-     device.isVirtualDevice {
-
-    macroNearSubject =
-      isMacroScene(
-        device: device
-      )
-
-  } else {
-
-    macroNearSubject = false
-  }
+  macroNearSubject = isMacroScene(device: device)
 
   print(
     "🌼 Macro manually disabled:",
@@ -858,14 +903,19 @@ private func updateMacroState() {
 
   if isMacroUserDisabled {
 
-    // 還在近距離：
-    // 不允許 Macro 再次出現。
-    if nearSubject {
+    // Keep Macro disabled at 1x until the user leaves that zoom range.
+    let zoom = device.videoZoomFactor
+    if zoom >= 0.90 && zoom <= 1.10 {
       return
     }
 
-    // 已經離開近距離：
-    // 才解除 suppression。
+    do {
+      try setAutoMacroEnabled(true, on: device)
+    } catch {
+      print("⚠️ Failed to re-enable automatic Macro: \(error)")
+      return
+    }
+
     isMacroUserDisabled = false
     macroNearSubject = false
 
@@ -1952,6 +2002,32 @@ private func updateMacroState() {
     _ value: Double
   ) throws {
 
+    guard selectedDevice != nil else {
+      throw CameraManagerError.cameraNotInitialized
+    }
+
+    var nativeZoom = value
+
+    if currentPosition == .back {
+      if value < 1.0 && currentLensType == "wide",
+         let device = selectedDevice,
+         !device.isVirtualDevice {
+        try selectCamera(
+          position: .back,
+          lensType: "ultraWide"
+        )
+      } else if value >= 1.0 && currentLensType == "ultraWide" {
+        try selectCamera(
+          position: .back,
+          lensType: "wide"
+        )
+      }
+
+      if currentLensType == "ultraWide" {
+        nativeZoom = value / 0.5
+      }
+    }
+
     guard let device = selectedDevice else {
       throw CameraManagerError.cameraNotInitialized
     }
@@ -1973,7 +2049,7 @@ private func updateMacroState() {
 
     let zoom =
       min(
-        max(value, minZoom),
+        max(nativeZoom, minZoom),
         maxZoom
       )
 

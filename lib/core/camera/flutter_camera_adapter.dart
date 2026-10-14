@@ -43,6 +43,8 @@ class FlutterCameraAdapter implements CameraPort {
 
   CameraController? get controller => _controller;
 
+  bool get usesNativeIOSCamera => _useNativeIOSCamera;
+
   @override
   Stream<List<int>> get analysisFrames =>
       _analysisFrameController.stream;
@@ -278,15 +280,7 @@ class FlutterCameraAdapter implements CameraPort {
   @override
   Future<void> switchToUltraWide() async {
     if (_useNativeIOSCamera) {
-      await _proChannel.invokeMethod<void>(
-        'selectCamera',
-        {
-          'position': 'back',
-          'lensType': 'ultraWide',
-        },
-      );
-
-      _nativeLensType = 'ultraWide';
+      await setZoom(0.5);
 
       return;
     }
@@ -333,15 +327,7 @@ class FlutterCameraAdapter implements CameraPort {
   @override
   Future<void> switchToStandardWide() async {
     if (_useNativeIOSCamera) {
-      await _proChannel.invokeMethod<void>(
-        'selectCamera',
-        {
-          'position': 'back',
-          'lensType': 'wide',
-        },
-      );
-
-      _nativeLensType = 'wide';
+      await setZoom(1.0);
 
       return;
     }

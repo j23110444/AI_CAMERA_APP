@@ -6992,102 +6992,71 @@ bool _isLivePhoto(String photoPath) {
                                 _zoomLevel = nextZoom;
                               });
 
+                              final usesNativeIOSCamera =
+                                  _cameraAdapter.usesNativeIOSCamera;
+
                               // ----------------------------------------------------------
-                              // 只有跨過 1x 才真正切換 Camera Input。
+                              // iOS 在同一個 Virtual Camera 上連續變焦；
+                              // 其他平台跨過 1x 時切換 Camera Input。
                               //
-                              // 0.5x ~ 0.99x：
-                              // 一直使用 Ultra Wide。
-                              //
-                              // 1.0x ~ 5x：
-                              // 使用 Wide Virtual Camera。
-                              //
-                              // 避免使用者拖動時一直重建 Camera Input。
+                              // 避免 iOS 拖動變焦時重建 Camera Input。
                               // ----------------------------------------------------------
 
                               if (shouldUseUltraWide !=
                                   _isUltraWideActive) {
 
-                                setState(() {
-                                  _cameraSwitching = true;
-                                });
-
-                                try {
-
-                                  if (shouldUseUltraWide) {
-
-                                    await _cameraAdapter
-                                        .switchToUltraWide();
-
-                                  } else {
-
-                                    await _cameraAdapter
-                                        .switchToStandardWide();
-                                  }
-
-                                  if (!mounted) return;
-
+                                if (usesNativeIOSCamera) {
                                   setState(() {
-
                                     _isUltraWideActive =
                                         shouldUseUltraWide;
-
                                     _focusPoint = null;
                                     _isFocusVisible = false;
                                     _isAeAfLocked = false;
                                   });
+                                } else {
+                                  setState(() {
+                                    _cameraSwitching = true;
+                                  });
 
-                                  // ------------------------------------------------------
-                                  // App Zoom → Native Zoom
-                                  //
-                                  // Ultra Wide：
-                                  //
-                                  // App 0.5x = Native 1.0x
-                                  // App 0.75x = Native 1.5x
-                                  // App 0.9x = Native 1.8x
-                                  // App 1.0x = 切回 Wide
-                                  //
-                                  // 這樣 0.5 → 0.99 不需要一直換鏡頭。
-                                  // ------------------------------------------------------
+                                  try {
+                                    if (shouldUseUltraWide) {
+                                      await _cameraAdapter
+                                          .switchToUltraWide();
+                                    } else {
+                                      await _cameraAdapter
+                                          .switchToStandardWide();
+                                    }
 
-                                  final nativeZoom =
-                                      shouldUseUltraWide
-                                          ? (nextZoom / 0.5)
-                                              .clamp(1.0, 2.0)
-                                              .toDouble()
-                                          : nextZoom;
-
-                                  await _cameraAdapter.setZoom(
-                                    nativeZoom,
-                                  );
-
-                                } catch (error) {
-
-                                  if (mounted) {
+                                    if (!mounted) return;
 
                                     setState(() {
-
-                                      _zoomLevel =
-                                          _isUltraWideActive
-                                              ? 0.5
-                                              : 1.0;
+                                      _isUltraWideActive =
+                                          shouldUseUltraWide;
+                                      _focusPoint = null;
+                                      _isFocusVisible = false;
+                                      _isAeAfLocked = false;
                                     });
-
-                                    _showAiTip(
-                                      '⚠️ 鏡頭切換失敗：$error',
-                                    );
-                                  }
-
-                                } finally {
-
-                                  if (mounted) {
-
-                                    setState(() {
-                                      _cameraSwitching = false;
-                                    });
+                                  } catch (error) {
+                                    if (mounted) {
+                                      setState(() {
+                                        _zoomLevel =
+                                            _isUltraWideActive
+                                                ? 0.5
+                                                : 1.0;
+                                      });
+                                      _showAiTip(
+                                        '⚠️ 鏡頭切換失敗：$error',
+                                      );
+                                    }
+                                    return;
+                                  } finally {
+                                    if (mounted) {
+                                      setState(() {
+                                        _cameraSwitching = false;
+                                      });
+                                    }
                                   }
                                 }
-
-                                return;
                               }
 
                               // ----------------------------------------------------------
@@ -7095,7 +7064,8 @@ bool _isLivePhoto(String photoPath) {
                               // ----------------------------------------------------------
 
                               final nativeZoom =
-                                  _isUltraWideActive
+                                  !usesNativeIOSCamera &&
+                                          _isUltraWideActive
                                       ? (nextZoom / 0.5)
                                           .clamp(1.0, 2.0)
                                           .toDouble()
@@ -7104,7 +7074,13 @@ bool _isLivePhoto(String photoPath) {
                               unawaited(
                                 _cameraAdapter.setZoom(
                                   nativeZoom,
-                                ),
+                                ).catchError((Object error) {
+                                  if (mounted) {
+                                    _showAiTip(
+                                      '⚠️ 鏡頭切換失敗：$error',
+                                    );
+                                  }
+                                }),
                               );
                             },
                           onHorizontalDragEnd: (details) {
