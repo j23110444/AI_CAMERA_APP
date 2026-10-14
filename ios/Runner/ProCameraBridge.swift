@@ -5,6 +5,11 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
 
   private let channelName = "ai_camera/pro"
   private let cameraManager = ProCameraManager()
+  private let zoomQueue = DispatchQueue(
+    label: "ai.camera.zoom.queue",
+    qos: .userInitiated
+  )
+
   private func cameraPosition(from value: String) -> AVCaptureDevice.Position {
     value == "front" ? .front : .back
   }
@@ -344,22 +349,42 @@ case "stopVideoRecording":
   }
 
 
-      case "setZoom":
+      case "setZoom", "setZoomSmoothly":
         let zoom = (call.arguments as? NSNumber)?.doubleValue ?? 1.0
+        let smoothly = call.method == "setZoomSmoothly"
 
-        try cameraManager.setZoom(zoom)
+        zoomQueue.async { [cameraManager = self.cameraManager] in
+          do {
+            try cameraManager.setZoom(
+              zoom,
+              smoothly: smoothly
+            )
 
-        result(nil)
-
-      case "setZoomSmoothly":
-        let zoom = (call.arguments as? NSNumber)?.doubleValue ?? 1.0
-
-        try cameraManager.setZoom(
-          zoom,
-          smoothly: true
-        )
-
-        result(nil)
+            DispatchQueue.main.async {
+              result(nil)
+            }
+          } catch let error as CameraManagerError {
+            DispatchQueue.main.async {
+              result(
+                FlutterError(
+                  code: error.code,
+                  message: error.message,
+                  details: nil
+                )
+              )
+            }
+          } catch {
+            DispatchQueue.main.async {
+              result(
+                FlutterError(
+                  code: "CAMERA_ERROR",
+                  message: error.localizedDescription,
+                  details: nil
+                )
+              )
+            }
+          }
+        }
 
 
       // MARK: - Macro

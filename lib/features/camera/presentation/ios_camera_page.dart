@@ -5657,49 +5657,61 @@ bool _isLivePhoto(String photoPath) {
                                 ],
                               )
                            : SizedBox.expand(
-                              key: _previewKey,
-                              child: ClipRect(
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    // iOS 使用原生 AVFoundation 預覽
-                                    if (Platform.isIOS)
-                                      const UiKitView(
-                                        viewType: 'ai_camera/pro_preview',
-                                      )
-                                    else
-                                      _buildCameraPreview(),
+                              child: ColoredBox(
+                                color: Colors.black,
+                                child: Center(
+                                  child: AspectRatio(
+                                    key: _previewKey,
+                                    aspectRatio: switch (_aspectRatio) {
+                                      '16:9' => 9 / 16,
+                                      '1:1' => 1,
+                                      _ => 3 / 4,
+                                    },
+                                    child: ClipRect(
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          // iOS 使用原生 AVFoundation 預覽
+                                          if (Platform.isIOS)
+                                            const UiKitView(
+                                              viewType: 'ai_camera/pro_preview',
+                                            )
+                                          else
+                                            _buildCameraPreview(),
 
-                                    // Flutter UI overlay 保持不變
-                                    _buildPreviewEffectOverlay(),
-                                    _buildFocusOverlay(),
-                                    _buildLevelOverlay(),
-                                    _buildProOverlay(),
+                                          // Flutter UI overlay 保持不變
+                                          _buildPreviewEffectOverlay(),
+                                          _buildFocusOverlay(),
+                                          _buildLevelOverlay(),
+                                          _buildProOverlay(),
 
-                                    CustomPaint(
-                                      painter: CompositionGridPainter(
-                                        _compositionGrid,
+                                          CustomPaint(
+                                            painter: CompositionGridPainter(
+                                              _compositionGrid,
+                                            ),
+                                          ),
+
+                                          if (_timerCountdown > 0)
+                                            Center(
+                                              child: Text(
+                                                '$_timerCountdown',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 72,
+                                                  fontWeight: FontWeight.w300,
+                                                  shadows: [
+                                                    Shadow(
+                                                      color: Colors.black,
+                                                      blurRadius: 8,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ),
-
-                                    if (_timerCountdown > 0)
-                                      Center(
-                                        child: Text(
-                                          '$_timerCountdown',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 72,
-                                            fontWeight: FontWeight.w300,
-                                            shadows: [
-                                              Shadow(
-                                                color: Colors.black,
-                                                blurRadius: 8,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                  ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -7062,7 +7074,7 @@ bool _isLivePhoto(String photoPath) {
                               unawaited(
                                 _cameraAdapter.setZoom(
                                   nativeZoom,
-                                  smoothly: true,
+                                  smoothly: false,
                                 ).catchError((Object error) {
                                   if (mounted) {
                                     _showAiTip(
