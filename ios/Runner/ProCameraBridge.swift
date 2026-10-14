@@ -145,6 +145,9 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
     let nightMode =
         (args["nightMode"] as? NSNumber)?.boolValue ?? false
 
+    let aspectRatio =
+        (args["aspectRatio"] as? NSNumber)?.doubleValue ?? 0.75
+
     do {
         let processedPath =
             try cameraManager.applyPhotoEffects(
@@ -155,7 +158,8 @@ final class ProCameraBridge: NSObject, FlutterPlugin {
                 paletteBlue: paletteBlue,
                 paletteOpacity: paletteOpacity,
                 exposure: exposure,
-                nightMode: nightMode
+                nightMode: nightMode,
+                aspectRatio: aspectRatio
             )
 
         DispatchQueue.main.async {
@@ -344,6 +348,16 @@ case "stopVideoRecording":
         let zoom = (call.arguments as? NSNumber)?.doubleValue ?? 1.0
 
         try cameraManager.setZoom(zoom)
+
+        result(nil)
+
+      case "setZoomSmoothly":
+        let zoom = (call.arguments as? NSNumber)?.doubleValue ?? 1.0
+
+        try cameraManager.setZoom(
+          zoom,
+          smoothly: true
+        )
 
         result(nil)
 

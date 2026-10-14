@@ -983,7 +983,7 @@ private func updateMacroState() {
     if photoOutput.maxPhotoQualityPrioritization == .quality {
 
       settings.photoQualityPrioritization =
-        .quality
+        .balanced
     }
 
     // ------------------------------------------------------------
@@ -1043,8 +1043,17 @@ private func updateMacroState() {
     paletteBlue: Double,
     paletteOpacity: Double,
     exposure: Double,
-    nightMode: Bool
+    nightMode: Bool,
+    aspectRatio: Double
   ) throws -> String {
+
+    guard aspectRatio.isFinite,
+          aspectRatio > 0,
+          aspectRatio <= 1.0 else {
+      throw CameraManagerError.unsupported(
+        "照片比例無效"
+      )
+    }
 
     let sourceURL =
       URL(
@@ -1382,10 +1391,26 @@ private func updateMacroState() {
     // 6. Crop
     // ------------------------------------------------------------
 
-    image =
-      image.cropped(
-        to: originalExtent
-      )
+    let cropWidth: CGFloat
+    let cropHeight: CGFloat
+    let imageAspectRatio = originalExtent.width / originalExtent.height
+
+    if imageAspectRatio > aspectRatio {
+      cropHeight = originalExtent.height
+      cropWidth = cropHeight * aspectRatio
+    } else {
+      cropWidth = originalExtent.width
+      cropHeight = cropWidth / aspectRatio
+    }
+
+    let cropRect = CGRect(
+      x: originalExtent.midX - cropWidth / 2,
+      y: originalExtent.midY - cropHeight / 2,
+      width: cropWidth,
+      height: cropHeight
+    )
+
+    image = image.cropped(to: cropRect)
 
     // ------------------------------------------------------------
     // 7. Render sRGB JPEG
@@ -1402,32 +1427,11 @@ private func updateMacroState() {
       )
     }
 
-    guard let outputCGImage =
-      ciContext.createCGImage(
-        image,
-        from: originalExtent,
-        format: .RGBA8,
-        colorSpace: outputColorSpace
-      )
-    else {
-
-      throw CameraManagerError.unsupported(
-        "Core Image 無法建立輸出影像"
-      )
-    }
-
-    let outputImage =
-      UIImage(
-        cgImage: outputCGImage,
-        scale: 1.0,
-        orientation: .up
-      )
-
-    guard let jpegData =
-      outputImage.jpegData(
-        compressionQuality: 0.95
-      )
-    else {
+    guard let jpegData = ciContext.jpegRepresentation(
+      of: image,
+      colorSpace: outputColorSpace,
+      options: [.lossyCompressionQuality: 0.92]
+    ) else {
 
       throw CameraManagerError.unsupported(
         "JPEG 編碼失敗"
@@ -1903,7 +1907,7 @@ private func updateMacroState() {
         .quality {
 
       settings.photoQualityPrioritization =
-        .quality
+        .balanced
     }
 
     // Flash
@@ -1972,7 +1976,8 @@ private func updateMacroState() {
   // MARK: - Zoom
 
   func setZoom(
-    _ value: Double
+    _ value: Double,
+    smoothly: Bool = false
   ) throws {
 
     guard selectedDevice != nil else {
@@ -2053,8 +2058,18 @@ private func updateMacroState() {
         maxZoom
       )
 
-    device.videoZoomFactor =
-      zoom
+    if device.isRampingVideoZoom {
+      device.cancelVideoZoomRamp()
+    }
+
+    if smoothly {
+      device.rampToVideoZoomFactor(
+        withRate: 3.0,
+        toVideoZoomFactor: zoom
+      )
+    } else {
+      device.videoZoomFactor = zoom
+    }
   }
 
   // MARK: - Exposure Bias

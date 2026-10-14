@@ -830,6 +830,39 @@ Future<void> _loadSavedImageLists() async {
     }
   }
 
+  Future<void> _selectWhiteBalance(String mode) async {
+    final previousMode = _whiteBalance;
+    setState(() => _whiteBalance = mode);
+
+    try {
+      switch (mode) {
+        case '自動':
+          await _cameraAdapter.setAutoWhiteBalance();
+          break;
+        case '日光':
+          await _cameraAdapter.setWhiteBalance(5600);
+          break;
+        case '陰天':
+          await _cameraAdapter.setWhiteBalance(6500);
+          break;
+        case '鎢絲燈':
+          await _cameraAdapter.setWhiteBalance(3200);
+          break;
+        case '自訂':
+          await _cameraAdapter.setWhiteBalance(_kelvin.toDouble());
+          break;
+      }
+
+      if (!mounted) return;
+      _showAiTip('白平衡已切換：$mode');
+    } catch (error) {
+      if (mounted) {
+        setState(() => _whiteBalance = previousMode);
+        _showAiTip('⚠️ 白平衡調整失敗：$error');
+      }
+    }
+  }
+
   void _handleLongPressStart(LongPressStartDetails details) {
     final renderObject = _previewKey.currentContext?.findRenderObject();
     if (renderObject is! RenderBox) return;
@@ -941,12 +974,18 @@ Future<void> _loadSavedImageLists() async {
 
 
 Future<String> _applyPhotoEffects(String sourcePath) async {
-  _showEffectDebug('④-1 進入原生特效處理');
-
   final sourceFile = File(sourcePath);
 
   if (!await sourceFile.exists()) {
     throw Exception('找不到照片檔案');
+  }
+
+  if (_filterMode == '原味' &&
+      _selectedPalette == '原味' &&
+      _exposureValue == 0 &&
+      !_nightMode &&
+      _aspectRatio == '4:3') {
+    return sourcePath;
   }
 
   try {
@@ -972,20 +1011,6 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
     final paletteBlue =
         paletteColor.b.toDouble() / 255.0;
 
-    _showEffectDebug(
-      '④-2 準備原生 Core Image\n'
-      'Filter：$_filterMode\n'
-      'Palette：$_selectedPalette\n'
-      'Palette RGB：'
-      '${paletteRed.toStringAsFixed(2)}, '
-      '${paletteGreen.toStringAsFixed(2)}, '
-      '${paletteBlue.toStringAsFixed(2)}\n'
-      'Palette 強度：'
-      '${paletteOpacity.toStringAsFixed(2)}\n'
-      'Exposure：$_exposureValue\n'
-      'Night：$_nightMode',
-    );
-
     // ====================================================
     // 2. 呼叫 iOS 原生 Core Image
     // ====================================================
@@ -1004,6 +1029,11 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
       exposure: _exposureValue.toDouble(),
 
       nightMode: _nightMode,
+      aspectRatio: switch (_aspectRatio) {
+        '16:9' => 9 / 16,
+        '1:1' => 1,
+        _ => 3 / 4,
+      },
     );
 
     // ====================================================
@@ -1040,30 +1070,6 @@ Future<String> _applyPhotoEffects(String sourcePath) async {
     // 4. 完成
     // ====================================================
 
-    _showEffectDebug(
-      '④-3 原生特效處理完成\n'
-      'Filter：$_filterMode\n'
-      'Palette：$_selectedPalette\n'
-      'Exposure：$_exposureValue\n'
-      'Night：$_nightMode',
-    );
-
-    _showEffectDebug(
-      '④-4 已取得原生處理照片\n'
-      '檔案：OK\n'
-      '大小：$size bytes',
-    );
-
-    _showEffectDebug(
-      '④-5 特效照片已輸出\n'
-      'Filter：$_filterMode\n'
-      'Palette：$_selectedPalette\n'
-      'Exposure：$_exposureValue\n'
-      'Night：$_nightMode\n'
-      '檔案：OK\n'
-      '大小：$size bytes',
-    );
-
     return processedPath;
   } catch (error, stackTrace) {
     debugPrint(
@@ -1094,32 +1100,13 @@ void _showEffectDebug(String message) {
 }
 Future<void> _capturePhoto() async {
   try {
-    String effectFlow = '① 開始拍照';
-
-    _showEffectDebug(effectFlow);
-    await Future<void>.delayed(
-      const Duration(milliseconds: 150),
-    );
-
     final liveCapture = _livePhotoEnabled
         ? await _cameraAdapter.captureLivePhoto()
         : null;
 
-    effectFlow += '\n② 已取得拍照結果';
-    _showEffectDebug(effectFlow);
-    await Future<void>.delayed(
-      const Duration(milliseconds: 150),
-    );
-
     final originalPath =
         liveCapture?.photoPath ??
         await _cameraAdapter.capturePhoto();
-
-    effectFlow += '\n③ 原始照片取得';
-    _showEffectDebug(effectFlow);
-    await Future<void>.delayed(
-      const Duration(milliseconds: 150),
-    );
 
     // ====================================================
     // 原始照片檢查
@@ -1141,9 +1128,6 @@ Future<void> _capturePhoto() async {
     // ====================================================
     // 套用照片特效
     // ====================================================
-    effectFlow += '\n④ 開始套用特效';
-    _showEffectDebug(effectFlow);
-
     final path = await _applyPhotoEffects(
       originalPath,
     );
@@ -1165,19 +1149,6 @@ Future<void> _capturePhoto() async {
       '$processedSize bytes',
     );
 
-    effectFlow +=
-        '\n⑤ 特效處理完成'
-        '\nFilter：$_filterMode'
-        '\nPalette：$_selectedPalette'
-        '\nExposure：$_exposureValue'
-        '\nNight：$_nightMode';
-
-    _showEffectDebug(effectFlow);
-
-    await Future<void>.delayed(
-      const Duration(milliseconds: 300),
-    );
-
     String? processedVideoPath;
 
     // ====================================================
@@ -1192,15 +1163,6 @@ Future<void> _capturePhoto() async {
     }
 
     if (!mounted) return;
-
-    effectFlow +=
-        '\n⑥ 準備加入 AI 精選預覽';
-
-    _showEffectDebug(effectFlow);
-
-    await Future<void>.delayed(
-      const Duration(milliseconds: 150),
-    );
 
     setState(() {
     _capturedImages.add(path);
@@ -1225,10 +1187,6 @@ Future<void> _capturePhoto() async {
     _isCapturing = false;
     _captureAnimation = true;
   });
-
-    effectFlow += '\n⑦ 已加入特效照片';
-
-    _showEffectDebug(effectFlow);
 
     Timer(
       const Duration(milliseconds: 550),
@@ -3039,7 +2997,7 @@ bool _isLivePhoto(String photoPath) {
                         .toList(),
                     onChanged: (value) {
                       if (value == null) return;
-                      setState(() => _whiteBalance = value);
+                      unawaited(_selectWhiteBalance(value));
                       setSheetState(() {});
                     },
                   ),
@@ -7104,6 +7062,7 @@ bool _isLivePhoto(String photoPath) {
                               unawaited(
                                 _cameraAdapter.setZoom(
                                   nativeZoom,
+                                  smoothly: true,
                                 ).catchError((Object error) {
                                   if (mounted) {
                                     _showAiTip(
@@ -7361,7 +7320,12 @@ bool _isLivePhoto(String photoPath) {
         setState(() {
           _zoomLevel = targetZoom;
         });
-        unawaited(_cameraAdapter.setZoom(targetZoom));
+        unawaited(
+          _cameraAdapter.setZoom(
+            targetZoom,
+            smoothly: true,
+          ),
+        );
         _showAiTip('🔍 變焦倍數調整至：$label');
       },
       child: Text(

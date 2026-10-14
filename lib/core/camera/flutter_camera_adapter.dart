@@ -532,10 +532,13 @@ class FlutterCameraAdapter implements CameraPort {
   // ---------------------------------------------------------------------------
 
   @override
-  Future<void> setZoom(double value) async {
+  Future<void> setZoom(
+    double value, {
+    bool smoothly = false,
+  }) async {
     if (_useNativeIOSCamera) {
       await _proChannel.invokeMethod<void>(
-        'setZoom',
+        smoothly ? 'setZoomSmoothly' : 'setZoom',
         value,
       );
 
@@ -663,6 +666,16 @@ class FlutterCameraAdapter implements CameraPort {
       {
         'kelvin': kelvin,
       },
+    );
+  }
+
+  Future<void> setAutoWhiteBalance() {
+    if (!_useNativeIOSCamera) {
+      return Future<void>.value();
+    }
+
+    return _proChannel.invokeMethod<void>(
+      'setAutoWhiteBalance',
     );
   }
 
@@ -929,6 +942,7 @@ Future<CameraMacroState> getMacroState() async {
     required double paletteOpacity,
     required double exposure,
     required bool nightMode,
+    required double aspectRatio,
   }) async {
     // -------------------------------------------------------------------------
     // 非 iOS
@@ -953,6 +967,7 @@ Future<CameraMacroState> getMacroState() async {
           'paletteOpacity': paletteOpacity,
           'exposure': exposure,
           'nightMode': nightMode,
+          'aspectRatio': aspectRatio,
         },
       );
 
