@@ -651,8 +651,13 @@ private func isMacroScene(
     return false
   }
 
-  return active.deviceType ==
-    .builtInUltraWideCamera
+  guard active.deviceType ==
+      .builtInUltraWideCamera
+  else {
+    return false
+  }
+
+  return active.lensPosition <= 0.2
 }
 
 private func configureVirtualCamera(
