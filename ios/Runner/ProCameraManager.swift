@@ -45,6 +45,8 @@ final class ProCameraManager: NSObject {
 
   private var macroMonitorTimer: Timer?
 
+  var previewPointConverter: ((CGPoint) -> CGPoint)?
+
   // MARK: - Outputs
 
   let photoOutput = AVCapturePhotoOutput()
@@ -613,7 +615,12 @@ private var macroVirtualCameraAvailable: Bool {
     return false
   }
 
-  return device.isVirtualDevice
+  return device.isVirtualDevice ||
+    (
+      isMacroUserDisabled &&
+      macroNearSubject &&
+      currentLensType == "wide"
+    )
 }
 
 /// 判斷目前是否為 Macro 近距離狀態。
@@ -709,6 +716,14 @@ func setMacroMode(
   if enabled {
 
     // 使用者重新允許 Macro。
+    if let device = selectedDevice,
+       !device.isVirtualDevice {
+      try selectCamera(
+        position: .back,
+        lensType: "wide"
+      )
+    }
+
     isMacroUserDisabled = false
 
     updateMacroState()
@@ -757,11 +772,10 @@ func macroState() -> [String: Any] {
     "userDisabled":
       isMacroUserDisabled,
 
-    // 使用者手動關閉後，
-    // Flutter 直接隱藏花朵。
+    // Keep the control available while the user-disabled close-up is active,
+    // so the user can re-enable Macro without changing lenses.
     "available":
-      macroVirtualCameraAvailable &&
-      !isMacroUserDisabled
+      macroVirtualCameraAvailable
   ]
 }
 
@@ -798,13 +812,27 @@ private func updateMacroState() {
   guard
     currentPosition == .back,
     currentLensType == "wide",
-    let device = selectedDevice,
-    device.isVirtualDevice
+    let device = selectedDevice
   else {
 
     isMacroEnabled = false
     macroNearSubject = false
 
+    return
+  }
+
+  guard device.isVirtualDevice else {
+    isMacroEnabled = false
+
+    if isMacroUserDisabled,
+       device.videoZoomFactor >= 0.90,
+       device.videoZoomFactor <= 1.10 {
+      macroNearSubject = true
+      return
+    }
+
+    isMacroUserDisabled = false
+    macroNearSubject = false
     return
   }
 
@@ -2264,10 +2292,20 @@ func setFocusPoint(
     )
   }
 
+  let previewPoint = CGPoint(x: x, y: y)
+  let convertedPoint =
+    previewPointConverter?(previewPoint) ??
+    previewPoint
   let point = CGPoint(
-    x: min(max(x, 0.0), 1.0),
-    y: min(max(y, 0.0), 1.0)
+    x: min(max(convertedPoint.x, 0.0), 1.0),
+    y: min(max(convertedPoint.y, 0.0), 1.0)
   )
+
+  guard device.isFocusModeSupported(.continuousAutoFocus) else {
+    throw CameraManagerError.unsupported(
+      "目前鏡頭不支援連續自動對焦"
+    )
+  }
 
   try device.lockForConfiguration()
 
@@ -2289,15 +2327,6 @@ func setFocusPoint(
   // 讓 Virtual Camera / AVFoundation 持續根據目前場景
   // 自動調整對焦，有利於近距離物體與 Macro 行為。
   // ------------------------------------------------------------
-
-  guard device.isFocusModeSupported(
-    .continuousAutoFocus
-  ) else {
-
-    throw CameraManagerError.unsupported(
-      "目前鏡頭不支援連續自動對焦"
-    )
-  }
 
   device.focusMode =
     .continuousAutoFocus

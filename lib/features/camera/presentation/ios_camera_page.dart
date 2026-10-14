@@ -768,7 +768,10 @@ Future<void> _loadSavedImageLists() async {
     });
   }
 
- void _handleFocusTap(Offset localPosition, Size size) {
+ Future<void> _handleFocusTap(
+    Offset localPosition,
+    Size size,
+  ) async {
   if (_isAeAfLocked || size.width <= 0 || size.height <= 0) return;
 
   final uiPoint = Offset(
@@ -783,45 +786,49 @@ Future<void> _loadSavedImageLists() async {
     _isLongPressActive = false;
   });
 
-  // AVFoundation 的 focusPointOfInterest 座標
-    // Flutter 預覽座標直接傳入原生相機。
-    // 不額外反轉 Y 軸。
-      final cameraPoint = Offset(
-        uiPoint.dx,
-        uiPoint.dy,
-      );
+  try {
+    await _cameraAdapter.setFocusPoint(
+      uiPoint.dx,
+      uiPoint.dy,
+    );
 
-      unawaited(() async {
-        try {
-          await _cameraAdapter.setFocusPoint(
-            cameraPoint.dx,
-            cameraPoint.dy,
-          );
+    if (!mounted) return;
 
-          debugPrint(
-            '🎯 Focus applied: '
-            'x=${cameraPoint.dx}, '
-            'y=${cameraPoint.dy}',
-          );
-        } catch (e, stackTrace) {
-          debugPrint('❌ Focus request failed: $e');
-          debugPrint('$stackTrace');
+    _focusTimer?.cancel();
+    _focusTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted && !_isAeAfLocked) {
+        setState(() => _isFocusVisible = false);
+      }
+    });
 
-          if (mounted) {
-            _showAiTip('⚠️ 對焦失敗：$e');
-          }
-        }
-      }());
+    debugPrint(
+      '🎯 Focus applied: x=${uiPoint.dx}, y=${uiPoint.dy}',
+    );
+    _showAiTip('◎ 已對焦');
+  } catch (error, stackTrace) {
+    debugPrint('❌ Focus request failed: $error');
+    debugPrint('$stackTrace');
 
-  _focusTimer?.cancel();
-  _focusTimer = Timer(const Duration(seconds: 2), () {
-    if (mounted && !_isAeAfLocked) {
-      setState(() => _isFocusVisible = false);
+    if (mounted) {
+      setState(() {
+        _focusPoint = null;
+        _isFocusVisible = false;
+        _exposureGestureArmed = false;
+      });
+      _showAiTip('⚠️ 對焦失敗：$error');
     }
-  });
-
-  _showAiTip('◎ 已對焦');
+  }
 }
+
+  Future<void> _applyManualFocus(double value) async {
+    try {
+      await _cameraAdapter.setManualFocus(value);
+    } catch (error) {
+      if (mounted) {
+        _showAiTip('⚠️ 手動對焦調整失敗：$error');
+      }
+    }
+  }
 
   void _handleLongPressStart(LongPressStartDetails details) {
     final renderObject = _previewKey.currentContext?.findRenderObject();
@@ -848,7 +855,7 @@ Future<void> _loadSavedImageLists() async {
         });
       } else {
         _exposureGestureArmed = false;
-        _toggleAeAfLock();
+        unawaited(_toggleAeAfLock());
       }
     });
     if (_exposureGestureArmed && isOutsideFocusFrame) {
@@ -881,15 +888,27 @@ Future<void> _loadSavedImageLists() async {
     }
   }
 
-  void _toggleAeAfLock() {
+  Future<void> _toggleAeAfLock() async {
     _focusTimer?.cancel();
+    final nextLocked = !_isAeAfLocked;
+
     setState(() {
-      _isAeAfLocked = !_isAeAfLocked;
+      _isAeAfLocked = nextLocked;
       _focusPoint ??= const Offset(0.5, 0.5);
       _isFocusVisible = true;
     });
-    unawaited(_cameraAdapter.setFocusLocked(_isAeAfLocked));
-    _showAiTip(_isAeAfLocked ? '🔒 AE/AF Lock 已鎖定' : '🔓 AE/AF Lock 已解除');
+
+    try {
+      await _cameraAdapter.setFocusLocked(nextLocked);
+      if (mounted) {
+        _showAiTip(nextLocked ? '🔒 AE/AF Lock 已鎖定' : '🔓 AE/AF Lock 已解除');
+      }
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() => _isAeAfLocked = !nextLocked);
+      _showAiTip('⚠️ 對焦鎖定失敗：$error');
+    }
   }
 
   Future<void> _startTimedCapture() async {
@@ -2995,7 +3014,7 @@ bool _isLivePhoto(String photoPath) {
                   1,
                   (value) {
                     setState(() => _manualFocus = value);
-                    unawaited(_cameraAdapter.setManualFocus(value));
+                    unawaited(_applyManualFocus(value));
                   },
                   setSheetState,
                   valueLabel: '${(_manualFocus * 100).round()}%',
@@ -5474,11 +5493,13 @@ bool _isLivePhoto(String photoPath) {
                           final renderObject = _previewKey.currentContext
                               ?.findRenderObject();
                           if (renderObject is RenderBox) {
-                            _handleFocusTap(
-                              renderObject.globalToLocal(
-                                details.globalPosition,
+                            unawaited(
+                              _handleFocusTap(
+                                renderObject.globalToLocal(
+                                  details.globalPosition,
+                                ),
+                                renderObject.size,
                               ),
-                              renderObject.size,
                             );
                           }
                         },
@@ -5779,13 +5800,17 @@ bool _isLivePhoto(String photoPath) {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
                       child: Row(
                         children: [
                           // ─────────────────────────
                           // 左側：AI 設定
                           // ─────────────────────────
                           Expanded(
+                            flex: 4,
                             child: Align(
                               alignment: Alignment.centerLeft,
                               child: ElevatedButton.icon(
@@ -5806,6 +5831,8 @@ bool _isLivePhoto(String photoPath) {
                                 ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.black54,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 12,
                                     vertical: 0,
@@ -5828,9 +5855,10 @@ bool _isLivePhoto(String photoPath) {
                           // ─────────────────────────
                           if (!_isRecording && _activeUploadedVideo == null)
                             Flexible(
-                              flex: 3,
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 10),
+                              flex: 7,
+                              child: Center(
+                                child: Padding(
+                                padding: const EdgeInsets.only(top: 4),
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -6030,11 +6058,13 @@ bool _isLivePhoto(String photoPath) {
                                   ],
                                 ),
                               ),
+                              ),
                             ),
                           // ─────────────────────────
                           // 右側：影片上傳與功能選單
                           // ─────────────────────────
                           Expanded(
+                            flex: 4,
                             child: Align(
                               alignment: Alignment.centerRight,
                               child: Container(
@@ -7355,10 +7385,9 @@ bool _isLivePhoto(String photoPath) {
   //
   // 使用者手動關閉
   // ↓
-  // 小花直接消失
+  // 保留可再次開啟的關閉狀態控制
   if (!_macroAvailable ||
-      _macroUserDisabled ||
-      !_macroEnabled) {
+      (!_macroEnabled && !_macroUserDisabled)) {
     return const SizedBox.shrink();
   }
 
@@ -7373,7 +7402,7 @@ bool _isLivePhoto(String photoPath) {
           size: const Size(40, 40),
           painter: MacroFlowerPainter(
             color: Colors.yellowAccent,
-            disabled: false,
+            disabled: _macroUserDisabled,
           ),
         ),
       ),

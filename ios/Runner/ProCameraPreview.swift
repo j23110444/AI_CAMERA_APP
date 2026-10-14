@@ -56,9 +56,10 @@ final class CameraPreviewView: UIView {
     frame: CGRect,
     cameraManager: ProCameraManager
   ) {
-    previewLayer = AVCaptureVideoPreviewLayer(
+    let layer = AVCaptureVideoPreviewLayer(
       session: cameraManager.session
     )
+    previewLayer = layer
 
     super.init(frame: frame)
 
@@ -66,7 +67,20 @@ final class CameraPreviewView: UIView {
 
     previewLayer.videoGravity = .resizeAspectFill
 
-    layer.addSublayer(previewLayer)
+    self.layer.addSublayer(previewLayer)
+
+    cameraManager.previewPointConverter = { [weak layer] point in
+      guard let layer else {
+        return point
+      }
+
+      return layer.captureDevicePointConverted(
+        fromLayerPoint: CGPoint(
+          x: point.x * layer.bounds.width,
+          y: point.y * layer.bounds.height
+        )
+      )
+    }
 
     updatePreviewConnection()
   }
