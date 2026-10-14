@@ -202,40 +202,19 @@ final class ProCameraManager: NSObject {
 
     let device: AVCaptureDevice
 
-    // ------------------------------------------------------------
-    // Wide 優先使用 Virtual Camera
-    // ------------------------------------------------------------
-
-    if lensType == "wide",
-       let virtualDevice =
-        findVirtualCamera(
-          position: position
-        ) {
-
-      device = virtualDevice
-
-      print(
-        "📷 Using Virtual Camera:",
-        virtualDevice.localizedName
+    guard let physicalDevice =
+      findCamera(
+        position: position,
+        lensType: lensType
       )
-
-    } else {
-
-      guard let physicalDevice =
-        findCamera(
-          position: position,
-          lensType: lensType
-        )
-      else {
-
-        throw CameraManagerError.cameraNotFound(
-          position: position,
-          lensType: lensType
-        )
-      }
-
-      device = physicalDevice
+    else {
+      throw CameraManagerError.cameraNotFound(
+        position: position,
+        lensType: lensType
+      )
     }
+
+    device = physicalDevice
 
     session.beginConfiguration()
 
@@ -299,7 +278,7 @@ final class ProCameraManager: NSObject {
     // ------------------------------------------------------------
 
     if device.isVirtualDevice {
-      try configureVirtualCamera(device)
+      _ = try configureVirtualCamera(device)
     }
 
     // ------------------------------------------------------------
@@ -457,9 +436,10 @@ final class ProCameraManager: NSObject {
   func selectCamera(
     position: AVCaptureDevice.Position,
     lensType: String,
-    preferPhysicalWide: Bool = false
+    preferPhysicalWide: Bool = true
   ) throws {
 
+    let previousDevice = currentInput?.device
     let device: AVCaptureDevice
 
     // ------------------------------------------------------------
@@ -497,6 +477,17 @@ final class ProCameraManager: NSObject {
 
       device = physicalDevice
     }
+
+    let switchesRearCamera =
+      currentPosition == .back &&
+      position == .back &&
+      (currentLensType == "wide" || currentLensType == "ultraWide") &&
+      (lensType == "wide" || lensType == "ultraWide") &&
+      previousDevice.map { $0.uniqueID != device.uniqueID } == true
+    let previousWhiteBalanceGains =
+      switchesRearCamera
+        ? previousDevice?.deviceWhiteBalanceGains
+        : nil
 
     session.beginConfiguration()
 
@@ -545,6 +536,13 @@ final class ProCameraManager: NSObject {
     currentPosition = position
     currentLensType = lensType
 
+    if let previousWhiteBalanceGains {
+      preserveWhiteBalance(
+        previousWhiteBalanceGains,
+        on: device
+      )
+    }
+
     // ------------------------------------------------------------
     // Virtual Camera
     //
@@ -553,7 +551,7 @@ final class ProCameraManager: NSObject {
     // ------------------------------------------------------------
 
     if device.isVirtualDevice {
-      try configureVirtualCamera(device)
+      _ = try configureVirtualCamera(device)
     }
 
     // ------------------------------------------------------------
@@ -609,16 +607,12 @@ private var macroVirtualCameraAvailable: Bool {
     return false
   }
 
-  guard let device = selectedDevice else {
+  guard selectedDevice != nil else {
     return false
   }
 
-  return device.isVirtualDevice ||
-    (
-      isMacroUserDisabled &&
-      macroNearSubject &&
-      currentLensType == "wide"
-    )
+  return currentLensType == "wide" &&
+    findVirtualCamera(position: .back) != nil
 }
 
 /// 判斷目前是否為 Macro 近距離狀態。
@@ -660,10 +654,10 @@ private func isMacroScene(
 private func configureVirtualCamera(
   _ device: AVCaptureDevice,
   allowAutomaticMacroSwitching: Bool = false
-) throws {
+) throws -> Bool {
 
   guard device.isVirtualDevice else {
-    return
+    return false
   }
 
   try device.lockForConfiguration()
@@ -681,7 +675,7 @@ private func configureVirtualCamera(
       "⚠️ Virtual Camera constituent switching unsupported"
     )
 
-    return
+    return false
   }
 
   let switchingBehavior:
@@ -697,6 +691,36 @@ private func configureVirtualCamera(
     "📷 Virtual Camera switching =",
     allowAutomaticMacroSwitching ? "AUTO" : "LOCKED"
   )
+
+  return true
+}
+
+private func preserveWhiteBalance(
+  _ sourceGains: AVCaptureDevice.WhiteBalanceGains,
+  on device: AVCaptureDevice
+) {
+  guard device.isWhiteBalanceModeSupported(.locked) else {
+    print("⚠️ Lens switch: locked white balance is unsupported")
+    return
+  }
+
+  let maxGain = device.maxWhiteBalanceGain
+  let gains = AVCaptureDevice.WhiteBalanceGains(
+    redGain: min(max(sourceGains.redGain, 1.0), maxGain),
+    greenGain: min(max(sourceGains.greenGain, 1.0), maxGain),
+    blueGain: min(max(sourceGains.blueGain, 1.0), maxGain)
+  )
+
+  do {
+    try device.lockForConfiguration()
+    defer {
+      device.unlockForConfiguration()
+    }
+
+    device.setWhiteBalanceModeLocked(with: gains)
+  } catch {
+    print("⚠️ Lens switch: failed to preserve white balance: \(error)")
+  }
 }
 
 // MARK: Macro Control
@@ -722,7 +746,8 @@ func setMacroMode(
        !device.isVirtualDevice {
       try selectCamera(
         position: .back,
-        lensType: "wide"
+        lensType: "wide",
+        preferPhysicalWide: false
       )
     }
 
@@ -730,10 +755,14 @@ func setMacroMode(
       throw CameraManagerError.cameraNotInitialized
     }
 
-    try configureVirtualCamera(
+    guard try configureVirtualCamera(
       device,
       allowAutomaticMacroSwitching: true
-    )
+    ) else {
+      throw CameraManagerError.unsupported(
+        "目前相機無法啟用自動微距鏡頭切換"
+      )
+    }
 
     isMacroAutomaticEnabled = true
     isMacroUserDisabled = false
@@ -751,7 +780,14 @@ func setMacroMode(
     throw CameraManagerError.cameraNotInitialized
   }
 
-  try configureVirtualCamera(device)
+  if device.isVirtualDevice {
+    try selectCamera(
+      position: .back,
+      lensType: "wide",
+      preferPhysicalWide: true
+    )
+  }
+
   isMacroUserDisabled = true
   isMacroEnabled = false
   isMacroAutomaticEnabled = false
@@ -1984,6 +2020,22 @@ private func updateMacroState() {
     }
 
     var nativeZoom = value
+
+    if currentPosition == .back {
+      if value < 1.0 && currentLensType == "wide" {
+        try selectCamera(
+          position: .back,
+          lensType: "ultraWide"
+        )
+      } else if value >= 1.0 &&
+          currentLensType == "ultraWide" {
+        try selectCamera(
+          position: .back,
+          lensType: "wide",
+          preferPhysicalWide: !isMacroAutomaticEnabled
+        )
+      }
+    }
 
     if currentPosition == .back,
        currentLensType == "ultraWide" {

@@ -1272,7 +1272,14 @@ Future<void> _capturePhoto() async {
     if ((details.scale - 1).abs() > 0.01) {
       final nextZoom = (_baseZoom * details.scale).clamp(0.5, 5.0);
       if (_zoomLevel != nextZoom) {
-        setState(() => _zoomLevel = nextZoom);
+        setState(() {
+          _zoomLevel = nextZoom;
+          _isUltraWideActive = nextZoom < 1.0;
+          if (_isUltraWideActive) {
+            _macroEnabled = false;
+            _macroAvailable = false;
+          }
+        });
         unawaited(_cameraAdapter.setZoom(nextZoom));
       }
     }
@@ -7319,6 +7326,11 @@ bool _isLivePhoto(String photoPath) {
         }
         setState(() {
           _zoomLevel = targetZoom;
+          _isUltraWideActive = targetZoom < 1.0;
+          if (_isUltraWideActive) {
+            _macroEnabled = false;
+            _macroAvailable = false;
+          }
         });
         unawaited(
           _cameraAdapter.setZoom(
