@@ -533,23 +533,18 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
   try {
     if (_macroEnabled) {
       await _cameraAdapter.setMacroMode(false);
-
-      if (!mounted) return;
-
-      setState(() {
-        _macroEnabled = false;
-        _macroUserDisabled = true;
-      });
     } else {
       await _cameraAdapter.setMacroMode(true);
-
-      if (!mounted) return;
-
-      setState(() {
-        _macroEnabled = true;
-        _macroUserDisabled = false;
-      });
     }
+
+    final state = await _cameraAdapter.getMacroState();
+    if (!mounted) return;
+
+    setState(() {
+      _macroEnabled = state.enabled;
+      _macroUserDisabled = state.userDisabled;
+      _macroAvailable = state.available;
+    });
 
   } catch (e) {
     if (mounted) {
@@ -7352,7 +7347,8 @@ bool _isLivePhoto(String photoPath) {
   }
 
   Widget _buildMacroControl() {
-  if (!_macroAvailable) {
+  if (!_macroAvailable ||
+      (!_macroEnabled && !_macroUserDisabled)) {
     return const SizedBox.shrink();
   }
 

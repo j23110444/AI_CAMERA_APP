@@ -32,7 +32,7 @@ final class ProCameraManager: NSObject {
   private var isMacroEnabled = false
 
   /// 使用者是否允許 AVFoundation 自動切換到微距鏡頭。
-  private var isMacroAutomaticEnabled = false
+  private var isMacroAutomaticEnabled = true
 
   /// 使用者手動關閉自動微距後的狀態。
   private var isMacroUserDisabled = false
@@ -200,21 +200,30 @@ final class ProCameraManager: NSObject {
     lensType: String
   ) throws {
 
+    let isReturningToRearCamera =
+      currentPosition != .back && position == .back
+
+    if position != .back || isReturningToRearCamera {
+      isMacroAutomaticEnabled = position == .back
+      isMacroUserDisabled = false
+    }
+
     let device: AVCaptureDevice
 
-    guard let physicalDevice =
-      findCamera(
-        position: position,
-        lensType: lensType
-      )
-    else {
+    if lensType == "wide",
+       let virtualDevice = findVirtualCamera(position: position) {
+      device = virtualDevice
+    } else if let physicalDevice = findCamera(
+      position: position,
+      lensType: lensType
+    ) {
+      device = physicalDevice
+    } else {
       throw CameraManagerError.cameraNotFound(
         position: position,
         lensType: lensType
       )
     }
-
-    device = physicalDevice
 
     session.beginConfiguration()
 
@@ -272,13 +281,14 @@ final class ProCameraManager: NSObject {
     currentLensType = lensType
 
     // ------------------------------------------------------------
-    // Configure Virtual Camera
-    //
-    // Keep lens switching locked until the user enables Macro.
+    // Configure the virtual camera using native constituent switching.
     // ------------------------------------------------------------
 
     if device.isVirtualDevice {
-      _ = try configureVirtualCamera(device)
+      _ = try configureVirtualCamera(
+        device,
+        allowAutomaticMacroSwitching: isMacroAutomaticEnabled
+      )
     }
 
     // ------------------------------------------------------------
@@ -436,8 +446,16 @@ final class ProCameraManager: NSObject {
   func selectCamera(
     position: AVCaptureDevice.Position,
     lensType: String,
-    preferPhysicalWide: Bool = true
+    preferPhysicalWide: Bool = false
   ) throws {
+
+    let isReturningToRearCamera =
+      currentPosition != .back && position == .back
+
+    if position != .back || isReturningToRearCamera {
+      isMacroAutomaticEnabled = position == .back
+      isMacroUserDisabled = false
+    }
 
     let device: AVCaptureDevice
 
@@ -527,12 +545,14 @@ final class ProCameraManager: NSObject {
     // ------------------------------------------------------------
     // Virtual Camera
     //
-    // Wide uses the virtual camera, with constituent switching locked
-    // unless the user explicitly enables automatic Macro.
+    // Wide uses one virtual input across its physical constituents.
     // ------------------------------------------------------------
 
     if device.isVirtualDevice {
-      _ = try configureVirtualCamera(device)
+      _ = try configureVirtualCamera(
+        device,
+        allowAutomaticMacroSwitching: isMacroAutomaticEnabled
+      )
     }
 
     // ------------------------------------------------------------
@@ -544,16 +564,19 @@ final class ProCameraManager: NSObject {
     // Wide Virtual Camera 處理，因此不能因為倍率變化
     // 就把 Macro 狀態強制關掉。
     //
-    // 真正的 0.5x 是實體 Ultra Wide，這時才離開
-    // Macro 的 Virtual Camera 狀態。
+    // 0.5x can use the Ultra Wide constituent without being Macro;
+    // Macro is only active for a close-focus switch near 1x.
     //
 
-    if position != .back || lensType == "ultraWide" {
+    if position != .back {
         isMacroEnabled = false
         isMacroAutomaticEnabled = false
         macroNearSubject = false
         isMacroUserDisabled = false
-      }
+    } else if lensType == "ultraWide" {
+      isMacroEnabled = false
+      macroNearSubject = false
+    }
 
     configureConnection()
 
@@ -661,16 +684,17 @@ private func configureVirtualCamera(
 
   let switchingBehavior:
     AVCaptureDevice.PrimaryConstituentDeviceSwitchingBehavior =
-      allowAutomaticMacroSwitching ? .auto : .locked
+      allowAutomaticMacroSwitching ? .auto : .restricted
 
   device.setPrimaryConstituentDeviceSwitchingBehavior(
     switchingBehavior,
-    restrictedSwitchingBehaviorConditions: []
+    restrictedSwitchingBehaviorConditions:
+      allowAutomaticMacroSwitching ? [] : [.videoZoomChanged]
   )
 
   print(
     "📷 Virtual Camera switching =",
-    allowAutomaticMacroSwitching ? "AUTO" : "LOCKED"
+    allowAutomaticMacroSwitching ? "AUTO" : "RESTRICTED"
   )
 
   return true
@@ -694,7 +718,7 @@ func setMacroMode(
 
   if enabled {
 
-    // Automatic lens switching is opt-in to avoid unexpected color shifts.
+    // Switch to the virtual camera when enabling automatic Macro.
     if let device = selectedDevice,
        !device.isVirtualDevice {
       try selectCamera(
@@ -734,10 +758,9 @@ func setMacroMode(
   }
 
   if device.isVirtualDevice {
-    try selectCamera(
-      position: .back,
-      lensType: "wide",
-      preferPhysicalWide: true
+    _ = try configureVirtualCamera(
+      device,
+      allowAutomaticMacroSwitching: false
     )
   }
 
@@ -757,7 +780,7 @@ func macroState() -> [String: Any] {
 
   return [
     "enabled":
-      isMacroAutomaticEnabled,
+      isMacroEnabled,
 
     "userDisabled":
       isMacroUserDisabled,
@@ -871,14 +894,27 @@ private func updateMacroState() {
 
   if isMacroUserDisabled {
 
-    // Keep Macro disabled at 1x until the user leaves that zoom range.
-    let zoom = device.videoZoomFactor
-    if zoom >= 0.90 && zoom <= 1.10 {
+    if nearSubject {
       return
     }
 
-    isMacroUserDisabled = false
-    macroNearSubject = false
+    do {
+      guard try configureVirtualCamera(
+        device,
+        allowAutomaticMacroSwitching: true
+      ) else {
+        throw CameraManagerError.unsupported(
+          "目前相機無法恢復自動微距鏡頭切換"
+        )
+      }
+
+      isMacroUserDisabled = false
+      macroNearSubject = false
+      isMacroAutomaticEnabled = true
+    } catch {
+      print("⚠️ Macro auto-switch restore failed: \(error)")
+      return
+    }
 
     print(
       "🌼 Macro suppression reset:"
@@ -1974,20 +2010,43 @@ private func updateMacroState() {
 
     var nativeZoom = value
 
-    if currentPosition == .back {
-      if value < 1.0 && currentLensType == "wide" {
-        try selectCamera(
-          position: .back,
-          lensType: "ultraWide"
-        )
-      } else if value >= 1.0 &&
-          currentLensType == "ultraWide" {
-        try selectCamera(
-          position: .back,
-          lensType: "wide",
-          preferPhysicalWide: !isMacroAutomaticEnabled
-        )
+    if currentPosition == .back,
+       currentLensType == "wide",
+       value < 1.0 {
+      let device = selectedDevice
+      let canUseVirtualZoom =
+        device?.isVirtualDevice == true &&
+        value >= (device?.minAvailableVideoZoomFactor ?? 1.0)
+
+      if !canUseVirtualZoom {
+        if findVirtualCamera(position: .back) != nil {
+          try selectCamera(
+            position: .back,
+            lensType: "wide",
+            preferPhysicalWide: false
+          )
+        }
+
+        guard let wideDevice = selectedDevice else {
+          throw CameraManagerError.cameraNotInitialized
+        }
+
+        if !wideDevice.isVirtualDevice ||
+           value < wideDevice.minAvailableVideoZoomFactor {
+          try selectCamera(
+            position: .back,
+            lensType: "ultraWide"
+          )
+        }
       }
+    } else if currentPosition == .back,
+              currentLensType == "ultraWide",
+              value >= 1.0 {
+      try selectCamera(
+        position: .back,
+        lensType: "wide",
+        preferPhysicalWide: false
+      )
     }
 
     if currentPosition == .back,
