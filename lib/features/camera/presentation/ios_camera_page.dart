@@ -540,18 +540,13 @@ class _IOSCameraPageState extends State<IOSCameraPage> {
         _macroEnabled = false;
         _macroUserDisabled = true;
       });
-
-      // 不改變目前 zoom。
-      // 不強制回 1x。
-      return;
-    }
-
-    if (_macroUserDisabled) {
+    } else {
       await _cameraAdapter.setMacroMode(true);
 
       if (!mounted) return;
 
       setState(() {
+        _macroEnabled = true;
         _macroUserDisabled = false;
       });
     }
@@ -5657,61 +5652,69 @@ bool _isLivePhoto(String photoPath) {
                                 ],
                               )
                            : SizedBox.expand(
-                              child: ColoredBox(
-                                color: Colors.black,
-                                child: Center(
-                                  child: AspectRatio(
-                                    key: _previewKey,
-                                    aspectRatio: switch (_aspectRatio) {
-                                      '16:9' => 9 / 16,
-                                      '1:1' => 1,
-                                      _ => 3 / 4,
-                                    },
-                                    child: ClipRect(
-                                      child: Stack(
-                                        fit: StackFit.expand,
-                                        children: [
-                                          // iOS 使用原生 AVFoundation 預覽
-                                          if (Platform.isIOS)
-                                            const UiKitView(
-                                              viewType: 'ai_camera/pro_preview',
-                                            )
-                                          else
-                                            _buildCameraPreview(),
+                              key: _previewKey,
+                              child: ClipRect(
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    // iOS 使用原生 AVFoundation 預覽
+                                    if (Platform.isIOS)
+                                      const UiKitView(
+                                        viewType: 'ai_camera/pro_preview',
+                                      )
+                                    else
+                                      _buildCameraPreview(),
 
-                                          // Flutter UI overlay 保持不變
-                                          _buildPreviewEffectOverlay(),
-                                          _buildFocusOverlay(),
-                                          _buildLevelOverlay(),
-                                          _buildProOverlay(),
+                                    // Flutter UI overlay 保持不變
+                                    _buildPreviewEffectOverlay(),
+                                    _buildFocusOverlay(),
+                                    _buildLevelOverlay(),
+                                    _buildProOverlay(),
 
-                                          CustomPaint(
-                                            painter: CompositionGridPainter(
-                                              _compositionGrid,
-                                            ),
-                                          ),
-
-                                          if (_timerCountdown > 0)
-                                            Center(
-                                              child: Text(
-                                                '$_timerCountdown',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 72,
-                                                  fontWeight: FontWeight.w300,
-                                                  shadows: [
-                                                    Shadow(
-                                                      color: Colors.black,
-                                                      blurRadius: 8,
-                                                    ),
-                                                  ],
-                                                ),
+                                    Center(
+                                      child: AspectRatio(
+                                        aspectRatio: switch (_aspectRatio) {
+                                          '16:9' => 9 / 16,
+                                          '1:1' => 1,
+                                          _ => 3 / 4,
+                                        },
+                                        child: IgnorePointer(
+                                          child: DecoratedBox(
+                                            decoration: BoxDecoration(
+                                              border: Border.all(
+                                                color: Colors.white70,
+                                                width: 1,
                                               ),
                                             ),
-                                        ],
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
+
+                                    CustomPaint(
+                                      painter: CompositionGridPainter(
+                                        _compositionGrid,
+                                      ),
+                                    ),
+
+                                    if (_timerCountdown > 0)
+                                      Center(
+                                        child: Text(
+                                          '$_timerCountdown',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 72,
+                                            fontWeight: FontWeight.w300,
+                                            shadows: [
+                                              Shadow(
+                                                color: Colors.black,
+                                                blurRadius: 8,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -7352,18 +7355,7 @@ bool _isLivePhoto(String photoPath) {
   }
 
   Widget _buildMacroControl() {
-  // 正常狀態不顯示。
-  //
-  // 只有：
-  // Macro 自動觸發
-  // ↓
-  // 顯示黃色小花
-  //
-  // 使用者手動關閉
-  // ↓
-  // 保留可再次開啟的關閉狀態控制
-  if (!_macroAvailable ||
-      (!_macroEnabled && !_macroUserDisabled)) {
+  if (!_macroAvailable) {
     return const SizedBox.shrink();
   }
 
@@ -7377,8 +7369,10 @@ bool _isLivePhoto(String photoPath) {
         child: CustomPaint(
           size: const Size(40, 40),
           painter: MacroFlowerPainter(
-            color: Colors.yellowAccent,
-            disabled: _macroUserDisabled,
+            color: _macroEnabled
+                ? Colors.yellowAccent
+                : Colors.white70,
+            disabled: !_macroEnabled,
           ),
         ),
       ),

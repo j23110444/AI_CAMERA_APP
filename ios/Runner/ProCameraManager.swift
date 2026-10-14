@@ -27,14 +27,14 @@ final class ProCameraManager: NSObject {
   /// Macro 不等於 0.5x。
   /// Macro 也不會把 1x 永久切成 Ultra Wide。
   ///
-  /// 1x 時使用 Wide Virtual Camera，
-  /// AVFoundation 自己決定是否切換到 Ultra Wide constituent。
+  /// 1x 時使用 Wide Virtual Camera。
+  /// 切換到 Ultra Wide constituent 須由使用者啟用自動微距。
   private var isMacroEnabled = false
 
-  /// 使用者手動關閉 Macro 後的暫時抑制狀態。
-  ///
-  /// 這不是永久設定。
-  /// 當使用者離開近距離場景，再次靠近時會重新允許自動 Macro。
+  /// 使用者是否允許 AVFoundation 自動切換到微距鏡頭。
+  private var isMacroAutomaticEnabled = false
+
+  /// 使用者手動關閉自動微距後的狀態。
   private var isMacroUserDisabled = false
 
   /// 上一次是否處於 Macro 近距離狀態。
@@ -295,10 +295,7 @@ final class ProCameraManager: NSObject {
     // ------------------------------------------------------------
     // Configure Virtual Camera
     //
-    // Wide Virtual Camera 使用 AVFoundation 自動 constituent
-    // switching。
-    //
-    // 注意：AUTO 不等於 Macro 開啟。
+    // Keep lens switching locked until the user enables Macro.
     // ------------------------------------------------------------
 
     if device.isVirtualDevice {
@@ -551,8 +548,8 @@ final class ProCameraManager: NSObject {
     // ------------------------------------------------------------
     // Virtual Camera
     //
-    // Wide 使用 Virtual Camera。
-    // AVFoundation 自動決定 constituent。
+    // Wide uses the virtual camera, with constituent switching locked
+    // unless the user explicitly enables automatic Macro.
     // ------------------------------------------------------------
 
     if device.isVirtualDevice {
@@ -574,6 +571,7 @@ final class ProCameraManager: NSObject {
 
     if position != .back || lensType == "ultraWide" {
         isMacroEnabled = false
+        isMacroAutomaticEnabled = false
         macroNearSubject = false
         isMacroUserDisabled = false
       }
@@ -660,7 +658,8 @@ private func isMacroScene(
 }
 
 private func configureVirtualCamera(
-  _ device: AVCaptureDevice
+  _ device: AVCaptureDevice,
+  allowAutomaticMacroSwitching: Bool = false
 ) throws {
 
   guard device.isVirtualDevice else {
@@ -685,15 +684,18 @@ private func configureVirtualCamera(
     return
   }
 
-  // 保持 iPhone 原生自動鏡頭選擇。
-  // 不要在這裡強制切 Ultra Wide。
+  let switchingBehavior:
+    AVCaptureDevice.PrimaryConstituentDeviceSwitchingBehavior =
+      allowAutomaticMacroSwitching ? .auto : .locked
+
   device.setPrimaryConstituentDeviceSwitchingBehavior(
-    .auto,
+    switchingBehavior,
     restrictedSwitchingBehaviorConditions: []
   )
 
   print(
-    "📷 Virtual Camera switching = AUTO"
+    "📷 Virtual Camera switching =",
+    allowAutomaticMacroSwitching ? "AUTO" : "LOCKED"
   )
 }
 
@@ -715,7 +717,7 @@ func setMacroMode(
 
   if enabled {
 
-    // 使用者重新允許 Macro。
+    // Automatic lens switching is opt-in to avoid unexpected color shifts.
     if let device = selectedDevice,
        !device.isVirtualDevice {
       try selectCamera(
@@ -724,6 +726,16 @@ func setMacroMode(
       )
     }
 
+    guard let device = selectedDevice else {
+      throw CameraManagerError.cameraNotInitialized
+    }
+
+    try configureVirtualCamera(
+      device,
+      allowAutomaticMacroSwitching: true
+    )
+
+    isMacroAutomaticEnabled = true
     isMacroUserDisabled = false
 
     updateMacroState()
@@ -735,9 +747,7 @@ func setMacroMode(
     return
   }
 
-  // 使用者手動關閉 Macro。
-  //
-  // 保留目前倍率，改用實體廣角避免虛擬鏡頭再次切到超廣角。
+  // Replacing the virtual input returns to the physical wide lens.
   guard let device = selectedDevice,
         device.isVirtualDevice
   else {
@@ -754,6 +764,7 @@ func setMacroMode(
 
   isMacroUserDisabled = true
   isMacroEnabled = false
+  isMacroAutomaticEnabled = false
   macroNearSubject = true
 
   print(
@@ -767,13 +778,11 @@ func macroState() -> [String: Any] {
 
   return [
     "enabled":
-      isMacroEnabled,
+      isMacroAutomaticEnabled,
 
     "userDisabled":
       isMacroUserDisabled,
 
-    // Keep the control available while the user-disabled close-up is active,
-    // so the user can re-enable Macro without changing lenses.
     "available":
       macroVirtualCameraAvailable
   ]
